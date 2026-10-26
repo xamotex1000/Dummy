@@ -116,6 +116,32 @@ export class Sfx {
     [392, 494, 587, 784].forEach((f, i) => this.a.tone({ freq: f, dur: 0.14, gain: 0.12, type: 'square', delay: i * 0.035 }));
   }
 
+  entranceOpen(kind) {
+    if (kind === 'door') {
+      this.a.noise({ dur: 0.1, freq: 500, gain: 0.35 });
+      this.a.tone({ freq: 170, freqEnd: 250, dur: 0.35, gain: 0.07, type: 'sawtooth' });
+    } else if (kind === 'hatch') {
+      this.a.tone({ freq: 330, dur: 0.12, gain: 0.08, type: 'square' });
+      this.a.noise({ dur: 0.3, type: 'bandpass', freq: 900, freqEnd: 400, q: 1.2, gain: 0.25 });
+    } else {
+      this.a.noise({ dur: 0.35, type: 'highpass', freq: 1500, gain: 0.3 });
+    }
+  }
+
+  entranceClose(kind) {
+    if (kind === 'door') {
+      this.a.tone({ freq: 90, freqEnd: 45, dur: 0.22, gain: 0.45 });
+      this.a.noise({ dur: 0.12, freq: 700, gain: 0.5 });
+      this.a.tone({ freq: 420, dur: 0.18, gain: 0.05, type: 'square', delay: 0.02 });
+    } else if (kind === 'hatch') {
+      this.a.tone({ freq: 620, dur: 0.16, gain: 0.08, type: 'square' });
+      this.a.tone({ freq: 930, dur: 0.12, gain: 0.05, type: 'square', delay: 0.04 });
+    } else {
+      this.a.tone({ freq: 140, freqEnd: 70, dur: 0.12, gain: 0.25 });
+      this.a.noise({ dur: 0.08, freq: 900, gain: 0.3 });
+    }
+  }
+
   select() {
     this.a.tone({ freq: 880, dur: 0.04, gain: 0.08, type: 'square' });
   }

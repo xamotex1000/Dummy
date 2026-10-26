@@ -34,6 +34,7 @@ export class Dummy {
     // after a throw is worth half the last.
     this.impactUntil = 0;
     this.impactChain = 0;
+    this.entering = null;
     this.alive = true;
     this.deadT = 0;
     this.gone = false;
@@ -189,6 +190,37 @@ export class Dummy {
     const k = 1 / Math.max(wa, wb, 0.5);
     seg.a.addVelocity(vx * wa * k, vy * wa * k, dt);
     seg.b.addVelocity(vx * wb * k, vy * wb * k, dt);
+  }
+
+  // Rotate the whole body around the pelvis (used to spawn it lying down).
+  rotate(angle) {
+    const { pelvis } = this.points;
+    const c = Math.cos(angle), s = Math.sin(angle);
+    for (const p of this.pointList) {
+      if (p === pelvis) continue;
+      const dx = p.x - pelvis.x, dy = p.y - pelvis.y;
+      p.x = p.px = pelvis.x + dx * c - dy * s;
+      p.y = p.py = pelvis.y + dx * s + dy * c;
+    }
+  }
+
+  // Coming in from outside the arena through an opening in one wall.
+  enter(wall) {
+    this.entering = { wall, t: 0 };
+    for (const p of this.pointList) p.passWall = wall;
+    // A balloon head would float straight back out of a ceiling hatch.
+    if (this.balloon) this.points.head.gravityScale = 1;
+  }
+
+  updateEntry(dt, bounds) {
+    const e = this.entering;
+    if (!e) return;
+    e.t += dt;
+    const inside = this.pointList.every((p) => p.x - p.r > bounds.left && p.x + p.r < bounds.right && p.y - p.r > bounds.top && p.y + p.r < bounds.bottom + 1);
+    if (!inside && e.t < 2) return;
+    for (const p of this.pointList) p.passWall = null;
+    if (this.balloon && !this.balloon.popped) this.points.head.gravityScale = -12;
+    this.entering = null;
   }
 
   isBleeding() {
