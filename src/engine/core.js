@@ -5,8 +5,11 @@
 //   render(ctx, renderer)
 //   resize(w, h)
 //   enter() / exit()
+//   blur()      the window lost focus or the tab was hidden
 //   blocksUpdate  true stops scenes below from updating
 //   opaque        true stops scenes below from rendering
+//
+// The top scene may set `engine.cursor` (a CSS cursor) during update.
 
 import { Renderer } from './renderer.js';
 import { Input } from './input.js';
@@ -27,8 +30,16 @@ export class Engine {
     this.slowT = 0;
     this.slowScale = 1;
     this._last = 0;
+    this.cursor = 'default';
     this._frame = this._frame.bind(this);
     window.addEventListener('resize', () => this.resize());
+    const blur = () => {
+      for (const s of this.scenes.slice()) s.blur?.();
+    };
+    window.addEventListener('blur', blur);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) blur();
+    });
     this.resize();
   }
 
@@ -100,6 +111,7 @@ export class Engine {
       n++;
     }
     if (n === 6) this.acc = 0;
+    if (this.canvas.style.cursor !== this.cursor) this.canvas.style.cursor = this.cursor;
     this._render();
     requestAnimationFrame(this._frame);
   }
@@ -109,6 +121,7 @@ export class Engine {
     let blocked = false;
     // Iterate over a copy: scenes may push or remove scenes while updating.
     const scenes = this.scenes.slice();
+    this.cursor = 'default';
     for (let i = scenes.length - 1; i >= 0; i--) {
       const s = scenes[i];
       if (!blocked && this.scenes.includes(s)) s.update?.(dt, i === top);

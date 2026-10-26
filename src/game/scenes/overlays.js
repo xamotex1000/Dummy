@@ -1,5 +1,8 @@
 // Overlay scenes drawn on top of the arena. Paperwork is the UI motif:
 // each round is a work order, results are stamped, cards are drafted.
+//
+// Overlays center on `layout.frame`: the arena on desktop (so the sidebar
+// stays readable), the whole screen on phones.
 
 import { roundRectPath, wrapText } from '../../engine/renderer.js';
 import { clamp, easeOutCubic, easeOutBack } from '../../engine/math.js';
@@ -28,13 +31,23 @@ function text(ctx, s, x, y, size, { family = F.body, weight = 600, color = C.pap
 function paragraph(ctx, s, x, y, width, size, lineH, opts = {}) {
   ctx.font = font(size, opts.family ?? F.body, opts.weight ?? 500);
   const lines = wrapText(ctx, s, width);
-  if (!opts.measure) lines.forEach((ln, i) => text(ctx, ln, x, y + i * lineH, size, { weight: 500, ...opts }));
+  lines.forEach((ln, i) => text(ctx, ln, x, y + i * lineH, size, { weight: 500, ...opts }));
   return lines.length * lineH;
 }
 
-function dim(ctx, L, a) {
-  ctx.fillStyle = `rgba(14,17,13,${0.64 * a})`;
-  ctx.fillRect(0, 0, L.w, L.h);
+function dim(ctx, r, a) {
+  ctx.fillStyle = `rgba(14,17,13,${Math.min(0.92, 0.64 * a)})`;
+  ctx.fillRect(r.x, r.y, r.w, r.h);
+}
+
+function keycap(ctx, label, x, y, { dark = false } = {}) {
+  ctx.font = font(12, F.body, 700);
+  const w = Math.max(22, ctx.measureText(label).width + 12);
+  roundRectPath(ctx, x, y - 11, w, 22, 5);
+  ctx.fillStyle = dark ? C.inkSoft : C.paperDim;
+  ctx.fill();
+  text(ctx, label, x + w / 2, y + 1, 12, { weight: 700, color: dark ? C.paperDim : C.paperInk, align: 'center', baseline: 'middle' });
+  return w;
 }
 
 function ticket(ctx, x, y, w, h, header, { bg = C.ink, fg = C.paper } = {}) {
@@ -96,7 +109,7 @@ function checkbox(ctx, x, y, state) {
 }
 
 function stampMark(ctx, label, x, y, color, t) {
-  const k = t < 0.18 ? 2 - (t / 0.18) : 1;
+  const k = t < 0.18 ? 2 - t / 0.18 : 1;
   ctx.save();
   ctx.translate(x, y);
   ctx.rotate(-0.22);
@@ -116,6 +129,8 @@ function hit(b, x, y) {
   return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
 }
 
+const pulse = (t) => 0.55 + 0.45 * Math.sin(t * 4);
+
 // ----------------------------------------------------------------- base
 
 class Overlay {
@@ -130,6 +145,14 @@ class Overlay {
 
   get L() {
     return this.play.layout;
+  }
+
+  get frame() {
+    return this.play.layout.frame;
+  }
+
+  get fine() {
+    return this.play.input.finePointer;
   }
 
   get appear() {
@@ -153,9 +176,13 @@ class Overlay {
       }
       return;
     }
-    if (!isTop || this.t < 0.2) return;
+    if (!isTop) return;
     const input = this.play.input;
     const p = input.pointer;
+    const hover = p.type === 'mouse' && p.inside ? this.buttons.find((b) => hit(b, p.x, p.y)) : null;
+    for (const b of this.buttons) b.hover = b === hover;
+    this.play.engine.cursor = hover ? 'pointer' : 'default';
+    if (this.t < 0.2) return;
     for (const key of input.keysPressed) this.keys[key]?.();
     if (p.pressed) for (const b of this.buttons) b.armed = hit(b, p.x, p.y);
     if (p.released) {
@@ -166,19 +193,40 @@ class Overlay {
     }
   }
 
-  drawButton(ctx, b, label, { primary = true } = {}) {
+  drawButton(ctx, b, label, { primary = true, key = null } = {}) {
     const down = b.armed ? 2 : 0;
     roundRectPath(ctx, b.x, b.y + down, b.w, b.h, 10);
-    ctx.fillStyle = primary ? C.ink : 'rgba(0,0,0,0)';
+    ctx.fillStyle = primary ? (b.hover ? C.inkSoft : C.ink) : b.hover ? 'rgba(239,234,223,0.12)' : 'rgba(0,0,0,0)';
     ctx.fill();
     ctx.lineWidth = 2;
-    ctx.strokeStyle = primary ? C.ink : C.paperDim;
+    ctx.strokeStyle = primary ? (b.hover ? C.accent : C.ink) : C.paperDim;
     ctx.stroke();
-    text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + down + 1, 16, { family: F.display, weight: 400, color: primary ? C.paper : C.paper, align: 'center', baseline: 'middle', spacing: 0.5 });
+    text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + down + 1, 16, { family: F.display, weight: 400, color: C.paper, align: 'center', baseline: 'middle', spacing: 0.5 });
+    if (key && this.fine) {
+      ctx.font = font(12, F.body, 700);
+      const kw = Math.max(22, ctx.measureText(key).width + 12);
+      keycap(ctx, key, b.x + b.w - kw - 12, b.y + b.h / 2 + down, { dark: true });
+    }
+  }
+
+  // A vertically centered ticket rectangle inside the frame.
+  ticketRect(w, h, drop = true) {
+    const R = this.frame;
+    w = Math.min(w, R.w - 32);
+    const x = R.x + (R.w - w) / 2;
+    const y = Math.max(R.y + 12, R.y + (R.h - h) / 2) + (drop ? (1 - easeOutBack(this.t / 0.35)) * 60 : 0);
+    return { x, y, w, h };
   }
 }
 
 // ---------------------------------------------------------------- title
+
+const CONTROLS = [
+  ['CLICK', 'Punch, shoot, drop grenades and anvils'],
+  ['DRAG', 'Grab and throw, or swing the bat and knife'],
+  ['1-7 / WHEEL', 'Switch weapon'],
+  ['ESC', 'Pause'],
+];
 
 export class TitleOverlay extends Overlay {
   constructor(play) {
@@ -187,34 +235,87 @@ export class TitleOverlay extends Overlay {
     this.keys = { enter: this.tapAnywhere, ' ': this.tapAnywhere };
   }
 
+  update(dt, isTop) {
+    super.update(dt, isTop);
+    if (isTop) this.play.engine.cursor = 'pointer';
+  }
+
   render(ctx) {
+    if (this.L.mode === 'wide') this.renderWide(ctx);
+    else this.renderCompact(ctx);
+  }
+
+  logo(ctx, x, y, size, align) {
+    for (const [word, dy, col] of [['DUMMY', 0, C.paper], ['RUN', size * 0.92, C.gold]]) {
+      text(ctx, word, x + 5, y + dy + 6, size, { family: F.display, weight: 400, color: C.accent, align, baseline: 'middle' });
+      text(ctx, word, x, y + dy, size, { family: F.display, weight: 400, color: col, align, baseline: 'middle' });
+    }
+  }
+
+  // Desktop: a left-hand column with the pitch and controls; the dummy stays
+  // visible on the right.
+  renderWide(ctx) {
     const L = this.L;
     const a = this.appear;
-    dim(ctx, L, a * 0.9);
+    const grad = ctx.createLinearGradient(0, 0, L.w, 0);
+    grad.addColorStop(0, `rgba(14,17,13,${0.95 * a})`);
+    grad.addColorStop(0.55, `rgba(14,17,13,${0.82 * a})`);
+    grad.addColorStop(1, `rgba(14,17,13,${0.35 * a})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, L.w, L.h);
+
     ctx.save();
     ctx.globalAlpha = a;
-    const size = clamp(L.w * 0.19, 52, 112);
-    const cy = L.h * 0.3;
+    const x = Math.max(56, L.w * 0.07);
+    const colW = Math.min(560, L.w * 0.48);
+    const size = clamp(L.h * 0.15, 70, 140);
+    let y = L.h * 0.16 + size * 0.5;
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(-0.04);
+    this.logo(ctx, 0, 0, size, 'left');
+    ctx.restore();
+    y += size * 1.55;
+    y += paragraph(ctx, 'Beat up a test dummy to meet each round’s work order before the clock runs out. Hit the optional bonus for an extra card. Draft weapons and mods between rounds. Miss a deadline and the run is over.', x, y, colW, 20, 27, { color: C.paperDim });
+    y += 22;
+    text(ctx, 'CONTROLS', x, y, 12, { weight: 700, color: C.muted, spacing: 1.5 });
+    y += 26;
+    for (const [key, desc] of CONTROLS) {
+      keycap(ctx, key, x, y, { dark: true });
+      text(ctx, desc, x + 120, y + 6, 17, { weight: 500, color: C.paper });
+      y += 32;
+    }
+    y += 26;
+    ctx.globalAlpha = a * pulse(this.t);
+    text(ctx, 'CLICK OR PRESS SPACE TO START', x, y, 22, { family: F.display, weight: 400, color: C.paper, spacing: 1 });
+    ctx.globalAlpha = a;
+    if (this.play.bestRound > 0) text(ctx, `Best run: round ${this.play.bestRound}`, x, y + 30, 15, { color: C.muted });
+    ctx.restore();
+  }
+
+  renderCompact(ctx) {
+    const L = this.L;
+    const a = this.appear;
+    dim(ctx, { x: 0, y: 0, w: L.w, h: L.h }, a * 1.4);
+    ctx.save();
+    ctx.globalAlpha = a;
+    const size = clamp(Math.min(L.w * 0.19, L.h * 0.13), 44, 112);
+    const cy = L.h * (L.mode === 'short' ? 0.2 : 0.3);
     ctx.save();
     ctx.translate(L.w / 2, cy);
     ctx.rotate(-0.06);
-    for (const [word, dy, col] of [['DUMMY', 0, C.paper], ['RUN', size * 0.92, C.gold]]) {
-      text(ctx, word, 5, dy + 6, size, { family: F.display, weight: 400, color: C.accent, align: 'center', baseline: 'middle' });
-      text(ctx, word, 0, dy, size, { family: F.display, weight: 400, color: col, align: 'center', baseline: 'middle' });
-    }
+    this.logo(ctx, 0, 0, size, 'center');
     ctx.restore();
 
-    const w = Math.min(380, L.w - 48);
+    const w = Math.min(420, L.w - 48);
     let y = cy + size * 1.75;
     y += paragraph(ctx, 'Beat up a test dummy to meet each round’s work order. Hit the optional bonus for an extra card. Draft weapons and mods between rounds. Run out of time and the run is over.', L.w / 2, y, w, 17, 23, { color: C.paperDim, align: 'center' });
-
-    const pulse = 0.55 + 0.45 * Math.sin(this.t * 4);
-    ctx.globalAlpha = a * pulse;
-    text(ctx, 'TAP TO START', L.w / 2, Math.max(y + 46, L.h * 0.74), 22, { family: F.display, weight: 400, color: C.paper, align: 'center', spacing: 1 });
+    const verb = this.fine ? 'CLICK' : 'TAP';
+    const py = Math.min(L.h - 50, Math.max(y + 46, L.h * 0.74));
+    ctx.globalAlpha = a * pulse(this.t);
+    text(ctx, `${verb} TO START`, L.w / 2, py, 22, { family: F.display, weight: 400, color: C.paper, align: 'center', spacing: 1 });
     ctx.globalAlpha = a;
-    if (this.play.bestRound > 0) {
-      text(ctx, `Best run: round ${this.play.bestRound}`, L.w / 2, Math.max(y + 76, L.h * 0.74 + 30), 15, { color: C.muted, align: 'center' });
-    }
+    if (this.play.bestRound > 0) text(ctx, `Best run: round ${this.play.bestRound}`, L.w / 2, py + 30, 15, { color: C.muted, align: 'center' });
     ctx.restore();
   }
 }
@@ -229,20 +330,22 @@ export class IntroOverlay extends Overlay {
     this.keys = { enter: go, ' ': go };
   }
 
+  update(dt, isTop) {
+    super.update(dt, isTop);
+    if (isTop) this.play.engine.cursor = 'pointer';
+  }
+
   render(ctx) {
-    const L = this.L;
     const round = this.play.round;
     const a = this.appear;
-    dim(ctx, L, a * 0.7);
-    const w = Math.min(400, L.w - 32);
+    dim(ctx, this.frame, a * 0.7);
+    const wide = this.frame.w >= 600;
+    const w = Math.min(wide ? 460 : 400, this.frame.w - 32);
     const inner = w - 36;
-
-    // Measure body height first so the ticket can be centered.
     ctx.font = font(16, F.body, 500);
     const hintH = wrapText(ctx, round.primary.hint, inner - 28).length * 20;
     const h = 40 + 26 + 18 + 30 + hintH + 22 + 18 + 30 + 22 + 30 + 34;
-    const x = (L.w - w) / 2;
-    const y = Math.max(L.arenaTop - 60, (L.h - h) / 2 - 20) + (1 - easeOutBack(this.t / 0.35)) * 60;
+    const { x, y } = this.ticketRect(w, h);
 
     ctx.save();
     ctx.globalAlpha = a;
@@ -271,9 +374,9 @@ export class IntroOverlay extends Overlay {
     text(ctx, `TIME ${round.time}s`, lx, cy, 16, { family: F.display, weight: 400 });
     if (round.cardAfter) text(ctx, 'Card pick after this round', x + w - 18, cy, 15, { weight: 600, color: C.muted, align: 'right' });
 
-    const pulse = 0.55 + 0.45 * Math.sin(this.t * 4);
-    ctx.globalAlpha = a * pulse;
-    text(ctx, 'TAP TO BEGIN', L.w / 2, Math.min(L.h - 16, y + h + 40), 18, { family: F.display, weight: 400, color: C.paper, align: 'center', spacing: 1 });
+    const prompt = this.fine ? 'CLICK OR PRESS SPACE TO BEGIN' : 'TAP TO BEGIN';
+    ctx.globalAlpha = a * pulse(this.t);
+    text(ctx, prompt, x + w / 2, Math.min(this.frame.y + this.frame.h - 16, y + h + 40), 18, { family: F.display, weight: 400, color: C.paper, align: 'center', spacing: 1 });
     ctx.restore();
   }
 }
@@ -289,16 +392,13 @@ export class ClearOverlay extends Overlay {
   }
 
   render(ctx) {
-    const L = this.L;
     const play = this.play;
     const round = play.round;
     const sec = round.secondary;
     const a = this.appear;
-    dim(ctx, L, a * 0.7);
-    const w = Math.min(400, L.w - 32);
+    dim(ctx, this.frame, a * 0.7);
     const h = 40 + 30 + 34 + 34 + 16 + 3 * 26 + 14 + 50 + 20;
-    const x = (L.w - w) / 2;
-    const y = (L.h - h) / 2 + (1 - easeOutBack(this.t / 0.35)) * 60;
+    const { x, y, w } = this.ticketRect(420, h);
     const lx = x + 18;
     const rx = x + w - 18;
 
@@ -329,7 +429,7 @@ export class ClearOverlay extends Overlay {
     }
     cy += 4;
     Object.assign(this.btn, { x: lx, y: cy, w: w - 36 });
-    this.drawButton(ctx, this.btn, 'CONTINUE');
+    this.drawButton(ctx, this.btn, 'CONTINUE', { key: 'SPACE' });
     stampMark(ctx, sec.state === 'done' ? 'PERFECT' : 'PASSED', rx - 62, y + 22, sec.state === 'done' ? C.accent : C.ink, this.t - 0.2);
     ctx.restore();
   }
@@ -345,6 +445,7 @@ export class CardOverlay extends Overlay {
     this.offer = drawOffer(play.run, play.rng, { bonus });
     this.picked = null;
     this.rects = [];
+    this.cardButtons = [];
     this.reroll = { x: 0, y: 0, w: 0, h: 44, onClick: () => this.doReroll() };
     for (let i = 1; i <= 5; i++) this.keys[String(i)] = () => this.offer[i - 1] && this.pick(this.offer[i - 1]);
     this.keys.r = () => this.doReroll();
@@ -356,6 +457,7 @@ export class CardOverlay extends Overlay {
     run.rerolls--;
     this.offer = drawOffer(run, this.play.rng, { bonus: this.bonus, exclude: this.offer.map((c) => c.id) });
     if (!this.offer.length) this.offer = drawOffer(run, this.play.rng, { bonus: this.bonus });
+    this.cardButtons = [];
     this.t = 0.2;
     this.play.sfx.select();
   }
@@ -372,83 +474,85 @@ export class CardOverlay extends Overlay {
   }
 
   layoutCards() {
-    const L = this.L;
+    const R = this.frame;
     const n = this.offer.length;
-    const top = 110;
-    const bottomRoom = this.play.run.rerolls > 0 ? 80 : 30;
-    const avail = L.h - top - bottomRoom;
-    const rows = L.w < 640;
-    const gap = 12;
+    const top = R.y + 110;
+    const bottomRoom = this.play.run.rerolls > 0 ? 84 : 30;
+    const avail = R.y + R.h - top - bottomRoom;
+    const rows = R.w < 640;
+    const gap = rows ? 12 : 18;
     if (rows) {
-      const w = Math.min(460, L.w - 32);
+      const w = Math.min(460, R.w - 32);
       const h = clamp((avail - gap * (n - 1)) / n, 84, 140);
       const total = n * h + (n - 1) * gap;
       const y0 = top + Math.max(0, (avail - total) / 2);
-      this.rects = this.offer.map((c, i) => ({ x: (L.w - w) / 2, y: y0 + i * (h + gap), w, h, rows: true }));
+      this.rects = this.offer.map((c, i) => ({ x: R.x + (R.w - w) / 2, y: y0 + i * (h + gap), w, h, rows: true }));
     } else {
-      const w = Math.min(220, (L.w - 48 - gap * (n - 1)) / n);
-      const h = clamp(avail, 240, 290);
+      const maxW = clamp(R.w * 0.2, 210, 270);
+      const w = Math.min(maxW, (R.w - 48 - gap * (n - 1)) / n);
+      const h = clamp(avail, 240, maxW * 1.3);
       const total = n * w + (n - 1) * gap;
-      const x0 = (L.w - total) / 2;
+      const x0 = R.x + (R.w - total) / 2;
       const y0 = top + Math.max(0, (avail - h) / 2);
       this.rects = this.offer.map((c, i) => ({ x: x0 + i * (w + gap), y: y0, w, h, rows: false }));
     }
-    const rw = Math.min(240, L.w - 32);
-    Object.assign(this.reroll, { x: (L.w - rw) / 2, y: L.h - 64, w: rw });
+    const rw = Math.min(260, R.w - 32);
+    Object.assign(this.reroll, { x: R.x + (R.w - rw) / 2, y: R.y + R.h - 66, w: rw });
   }
 
   update(dt, isTop) {
     this.layoutCards();
-    this.buttons = [
-      ...this.offer.map((card, i) => ({ ...this.rects[i], onClick: () => this.pick(card), armed: this.buttons[i]?.armed })),
-    ];
+    // Card buttons persist so hover and press state survive re-layout.
+    this.cardButtons = this.offer.map((card, i) => Object.assign(this.cardButtons[i] ?? {}, this.rects[i], { onClick: () => this.pick(card) }));
+    this.buttons = [...this.cardButtons];
     if (this.play.run.rerolls > 0) this.buttons.push(this.reroll);
     super.update(dt, isTop);
   }
 
   render(ctx) {
-    const L = this.L;
+    const R = this.frame;
     const a = this.appear;
-    dim(ctx, L, a * 1.4);
+    dim(ctx, R, a * 1.4);
     this.layoutCards();
     ctx.save();
     ctx.globalAlpha = a;
-    text(ctx, this.bonus ? 'BONUS CARD' : 'PICK A CARD', L.w / 2, 56, clamp(L.w * 0.08, 26, 38), { family: F.display, weight: 400, color: this.bonus ? C.accent : C.paper, align: 'center' });
+    const cx = R.x + R.w / 2;
+    text(ctx, this.bonus ? 'BONUS CARD' : 'PICK A CARD', cx, R.y + 58, clamp(R.w * 0.06, 26, 40), { family: F.display, weight: 400, color: this.bonus ? C.accent : C.paper, align: 'center' });
     const sub = this.bonus ? 'You hit the bonus. Take one more.' : `Round ${this.play.round.number} cleared. Choose one.`;
-    text(ctx, sub, L.w / 2, 84, 16, { weight: 500, color: C.paperDim, align: 'center' });
+    const keyHint = this.fine ? `  Press 1-${this.offer.length} to pick.` : '';
+    text(ctx, sub + keyHint, cx, R.y + 88, 16, { weight: 500, color: C.paperDim, align: 'center' });
 
-    const p = this.play.input.pointer;
     this.offer.forEach((card, i) => {
       const r = this.rects[i];
       const delay = i * 0.06;
       const k = easeOutBack((this.t - delay) / 0.3);
       if (k <= 0) return;
-      const hover = p.type === 'mouse' && p.inside && hit(r, p.x, p.y);
+      const hover = this.cardButtons[i]?.hover;
       ctx.save();
       ctx.globalAlpha = a * clamp((this.t - delay) / 0.15, 0, 1) * (this.picked && this.picked !== card ? 0.3 : 1);
-      ctx.translate(r.x + r.w / 2, r.y + r.h / 2 + (1 - k) * 40 - (hover ? 4 : 0));
-      const s = this.picked === card ? 1 + (this.closing >= 0 ? this.closing * 0.6 : 0) : 1;
+      ctx.translate(r.x + r.w / 2, r.y + r.h / 2 + (1 - k) * 40 - (hover ? 8 : 0));
+      const s = this.picked === card ? 1 + (this.closing >= 0 ? this.closing * 0.6 : 0) : hover ? 1.03 : 1;
       ctx.scale(s, s);
-      drawCard(ctx, card, -r.w / 2, -r.h / 2, r.w, r.h, r.rows, i + 1);
+      drawCard(ctx, card, -r.w / 2, -r.h / 2, r.w, r.h, r.rows, i + 1, { hover, keys: this.fine });
       ctx.restore();
     });
 
     const run = this.play.run;
-    if (run.rerolls > 0) this.drawButton(ctx, this.reroll, `REROLL (${run.rerolls})`, { primary: false });
+    if (run.rerolls > 0) this.drawButton(ctx, this.reroll, `REROLL (${run.rerolls})`, { primary: false, key: 'R' });
     ctx.restore();
   }
 }
 
-function drawCard(ctx, card, x, y, w, h, rows, index) {
+function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = false } = {}) {
   const rc = C.rarity[card.rarity] ?? C.rarity.common;
-  roundRectPath(ctx, x + 3, y + 5, w, h, 10);
+  roundRectPath(ctx, x + 3, y + (hover ? 12 : 5), w, h, 10);
   ctx.fillStyle = 'rgba(0,0,0,0.35)';
   ctx.fill();
   roundRectPath(ctx, x, y, w, h, 10);
   ctx.fillStyle = C.paper;
   ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = rc;
+  ctx.lineWidth = hover ? 4 : 3;
+  ctx.strokeStyle = hover ? C.accent : rc;
   ctx.stroke();
 
   ctx.save();
@@ -488,15 +592,63 @@ function drawCard(ctx, card, x, y, w, h, rows, index) {
     const maxLines = Math.max(1, Math.floor((y + h - 8 - ty) / 18) + 1);
     descLines.slice(0, maxLines).forEach((ln, i) => text(ctx, ln, tx, ty + i * 18, 15, { weight: 500, color: '#4c473e' }));
   } else {
-    const iconSize = Math.min(w - 40, 96);
-    drawIcon(x + w / 2, y + 34 + iconSize / 2, iconSize);
-    let ty = y + 34 + iconSize + 30;
+    const iconSize = Math.min(w - 40, 100);
+    drawIcon(x + w / 2, y + 36 + iconSize / 2, iconSize);
+    let ty = y + 36 + iconSize + 30;
     ctx.font = font(18, F.display, 400);
     const nameLines = wrapText(ctx, card.name.toUpperCase(), w - 24).slice(0, 2);
     nameLines.forEach((ln, i) => text(ctx, ln, x + w / 2, ty + i * 21, 18, { family: F.display, weight: 400, align: 'center', maxWidth: w - 24 }));
     ty += nameLines.length * 21 + 6;
     paragraph(ctx, card.desc, x + w / 2, ty, w - 28, 16, 20, { color: '#4c473e', align: 'center' });
-    text(ctx, String(index), x + w / 2, y + h - 12, 12, { weight: 700, color: C.muted, align: 'center' });
+    if (keys) {
+      ctx.font = font(12, F.body, 700);
+      const kw = Math.max(22, ctx.measureText(String(index)).width + 12);
+      keycap(ctx, String(index), x + (w - kw) / 2, y + h - 20);
+    }
+  }
+}
+
+// ----------------------------------------------------------------- pause
+
+export class PauseOverlay extends Overlay {
+  constructor(play) {
+    super(play);
+    this.blocksUpdate = true;
+    const mk = (onClick) => ({ x: 0, y: 0, w: 0, h: 48, onClick });
+    this.resume = mk(() => this.close());
+    this.restart = mk(() => this.close(() => this.play.newRun()));
+    this.quit = mk(() => this.close(() => this.play.quitToTitle()));
+    this.buttons = [this.resume, this.restart, this.quit];
+    this.keys = { escape: this.resume.onClick, p: this.resume.onClick, enter: this.resume.onClick };
+  }
+
+  render(ctx) {
+    const play = this.play;
+    const a = this.appear;
+    dim(ctx, this.frame, a * 1.1);
+    const h = 40 + 34 + 26 + 3 * 58 + 10;
+    const { x, y, w } = this.ticketRect(360, h, false);
+    ctx.save();
+    ctx.globalAlpha = a;
+    ticket(ctx, x, y, w, h, 'PAUSED');
+    text(ctx, `Round ${play.round.number} · ${Math.ceil(Math.max(0, play.timeLeft))}s left on the clock`, x + 18, y + 40 + 34, 16, { weight: 600, color: C.muted, maxWidth: w - 36 });
+    let by = y + 40 + 34 + 22;
+    for (const [b, label, primary, key] of [[this.resume, 'RESUME', true, 'ESC'], [this.restart, 'NEW RUN', false], [this.quit, 'QUIT TO TITLE', false]]) {
+      Object.assign(b, { x: x + 18, y: by, w: w - 36 });
+      if (!primary) {
+        roundRectPath(ctx, b.x, b.y, b.w, b.h, 10);
+        ctx.fillStyle = b.hover ? C.paperDim : 'rgba(0,0,0,0)';
+        ctx.fill();
+        ctx.lineWidth = 2;
+        ctx.strokeStyle = C.paperDim;
+        ctx.stroke();
+        text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + 1, 16, { family: F.display, weight: 400, color: C.paperInk, align: 'center', baseline: 'middle', spacing: 0.5 });
+      } else {
+        this.drawButton(ctx, b, label, { key });
+      }
+      by += 58;
+    }
+    ctx.restore();
   }
 }
 
@@ -511,20 +663,16 @@ export class SecondWindOverlay extends Overlay {
   }
 
   render(ctx) {
-    const L = this.L;
     const a = this.appear;
-    dim(ctx, L, a * 0.75);
-    const w = Math.min(380, L.w - 32);
+    dim(ctx, this.frame, a * 0.75);
     const h = 220;
-    const x = (L.w - w) / 2;
-    const y = (L.h - h) / 2;
+    const { x, y, w } = this.ticketRect(380, h, false);
     ctx.save();
     ctx.globalAlpha = a;
     ticket(ctx, x, y, w, h, 'SECOND WIND', { bg: C.gold, fg: C.ink });
-    let cy = y + 76;
-    cy += paragraph(ctx, `Time ran out on round ${this.play.round.number}, but your Second Wind card saves the run. You get a fresh work order for the same round.`, x + 18, cy, w - 36, 17, 22, {});
+    paragraph(ctx, `Time ran out on round ${this.play.round.number}, but your Second Wind card saves the run. You get a fresh work order for the same round.`, x + 18, y + 76, w - 36, 17, 22, {});
     Object.assign(this.btn, { x: x + 18, y: y + h - 68, w: w - 36 });
-    this.drawButton(ctx, this.btn, 'RETRY ROUND');
+    this.drawButton(ctx, this.btn, 'RETRY ROUND', { key: 'SPACE' });
     ctx.restore();
   }
 }
@@ -538,15 +686,10 @@ export class GameOverOverlay extends Overlay {
   }
 
   render(ctx) {
-    const L = this.L;
     const play = this.play;
     const run = play.run;
     const a = this.appear;
-    dim(ctx, L, a * 0.8);
-    const w = Math.min(400, L.w - 32);
-    const x = (L.w - w) / 2;
-    const lx = x + 18;
-    const rx = x + w - 18;
+    dim(ctx, this.frame, a * 0.8);
     const fav = Object.entries(run.weaponDamage).sort((p, q) => q[1] - p[1])[0]?.[0];
     const rows = [
       ['Rounds cleared', String(run.totals.cleared)],
@@ -557,10 +700,13 @@ export class GameOverOverlay extends Overlay {
       ['Favorite weapon', fav ? WEAPONS[fav].name : '-'],
     ];
     const cards = run.taken.length ? run.taken.join(', ') : 'None';
+    const w0 = Math.min(420, this.frame.w - 32);
     ctx.font = font(15, F.body, 500);
-    const cardLines = Math.min(4, wrapText(ctx, cards, w - 36).length);
+    const cardLines = Math.min(4, wrapText(ctx, cards, w0 - 36).length);
     const h = 40 + 44 + 38 + rows.length * 25 + 16 + 22 + cardLines * 19 + 20 + 50 + 18;
-    const y = Math.max(8, (L.h - h) / 2) + (1 - easeOutBack(this.t / 0.35)) * 60;
+    const { x, y, w } = this.ticketRect(w0, h);
+    const lx = x + 18;
+    const rx = x + w - 18;
 
     ctx.save();
     ctx.globalAlpha = a;
@@ -583,7 +729,7 @@ export class GameOverOverlay extends Overlay {
     wrapText(ctx, cards, w - 36).slice(0, 4).forEach((ln, i) => text(ctx, ln, lx, cy + i * 19, 15, { weight: 500 }));
     cy += cardLines * 19 + 8;
     Object.assign(this.btn, { x: lx, y: cy, w: w - 36 });
-    this.drawButton(ctx, this.btn, 'NEW RUN');
+    this.drawButton(ctx, this.btn, 'NEW RUN', { key: 'SPACE' });
     stampMark(ctx, 'VOID', rx - 44, y + 22, C.ink, this.t - 0.25);
     ctx.restore();
   }

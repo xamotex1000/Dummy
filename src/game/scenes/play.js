@@ -12,9 +12,10 @@ import { Run } from '../run.js';
 import { Sfx } from '../sfx.js';
 import { Hud } from '../hud.js';
 import { buildBackground } from '../background.js';
+import { computeLayout } from '../layout.js';
 import { drawWeaponIcon } from '../icons.js';
 import { C, F, font } from '../theme.js';
-import { TitleOverlay, IntroOverlay, ClearOverlay, CardOverlay, GameOverOverlay, SecondWindOverlay } from './overlays.js';
+import { TitleOverlay, IntroOverlay, ClearOverlay, CardOverlay, GameOverOverlay, SecondWindOverlay, PauseOverlay } from './overlays.js';
 
 const BEST_KEY = 'dummy-run-best';
 
@@ -68,23 +69,63 @@ export class PlayScene {
     this.combo = { count: 0, t: 0 };
     this.stamp = null;
     this.bestRound = loadBest();
-    this.layout = { w: 1, h: 1, hudH: 104, barH: 84, barTop: 1, floorY: 1, arenaTop: 104 };
-    this.scale = 1;
+    this.layout = computeLayout(engine.width, engine.height);
+    // The pointer in world units, refreshed every tick.
+    this.ptr = { x: 0, y: 0, lastX: 0, lastY: 0, vx: 0, vy: 0, speed: 0 };
+  }
+
+  get bounds() {
+    return this.world.bounds;
   }
 
   // ---------------------------------------------------------------- layout
 
   resize(w, h) {
-    const hudH = 104;
-    const barH = clamp(Math.round(h * 0.11), 70, 92);
-    const floorH = 14;
-    this.layout = { w, h, hudH, barH, barTop: h - barH, floorY: h - barH - floorH, arenaTop: hudH };
-    const L = this.layout;
-    this.world.bounds = { left: 0, top: L.arenaTop, right: w, bottom: L.floorY };
-    this.particles.floorY = L.floorY;
-    this.scale = clamp(Math.min((L.floorY - L.arenaTop) / 520, w / 330), 0.45, 1.2);
-    this.bg = buildBackground(w, h, L, this.engine.renderer.dpr);
+    const L = (this.layout = computeLayout(w, h));
+    this.world.bounds = { left: 0, top: 0, right: L.worldW, bottom: L.worldH };
+    this.particles.floorY = L.worldH;
+    this.bg = buildBackground(L, this.engine.renderer.dpr);
     this.hud.layout();
+  }
+
+  // Screen pixels to world units.
+  toWorld(x, y) {
+    const L = this.layout;
+    return { x: (x - L.arena.x) / L.k, y: (y - L.arena.y) / L.k };
+  }
+
+  inArena(x, y) {
+    const A = this.layout.arena;
+    return x >= A.x && x <= A.x + A.w && y >= A.y && y <= A.y + A.h;
+  }
+
+  syncPointer() {
+    const p = this.input.pointer;
+    const k = this.layout.k;
+    const cur = this.toWorld(p.x, p.y);
+    const last = this.toWorld(p.lastX, p.lastY);
+    Object.assign(this.ptr, { x: cur.x, y: cur.y, lastX: last.x, lastY: last.y, vx: p.vx / k, vy: p.vy / k, speed: p.speed / k });
+  }
+
+  pause() {
+    if (this.state !== 'playing' || this.engine.top() !== this) return;
+    this.releaseGrab(false);
+    this.handTap = null;
+    this.pointerOwner = null;
+    this.engine.push(new PauseOverlay(this));
+  }
+
+  // Desktop: losing focus mid-round pauses instead of burning the clock.
+  blur() {
+    this.pause();
+  }
+
+  quitToTitle() {
+    for (const s of this.engine.scenes.slice()) if (s !== this) this.engine.remove(s);
+    this.run = null;
+    this.round = null;
+    this.hud.layout();
+    this.showTitle();
   }
 
   // ------------------------------------------------------------- lifecycle
@@ -196,14 +237,14 @@ export class PlayScene {
   // ----------------------------------------------------------------- spawning
 
   spawnDummy(x) {
-    const L = this.layout;
+    const W = this.bounds.right;
     const rd = this.round?.dummy ?? { hp: 100, scale: 1 };
-    const s = this.scale * rd.scale;
+    const s = rd.scale;
     const run = this.run;
     const margin = 60 * s;
-    x = x ?? L.w / 2 + this.rng.range(-0.12, 0.12) * L.w;
-    x = clamp(x, margin, Math.max(margin, L.w - margin));
-    const y = L.arenaTop + 126 * s;
+    x = x ?? W / 2 + this.rng.range(-0.12, 0.12) * Math.min(W, 700);
+    x = clamp(x, margin, Math.max(margin, W - margin));
+    const y = 126 * s;
     const d = new Dummy(this.world, x, y, {
       scale: s,
       hp: rd.hp,
@@ -216,9 +257,8 @@ export class PlayScene {
   }
 
   spawnGrenade(x, y, { cluster = false, radius = 1, fuse = 1.3, mini = false } = {}) {
-    const s = this.scale;
-    const p = new Point(x, y, { r: (mini ? 6 : 9) * s, mass: 0.6, bounce: 0.45, friction: 0.7, group: 'proj' });
-    const g = { kind: 'grenade', p, fuse, maxFuse: fuse, cluster, mini, R: 120 * s * radius * (mini ? 0.55 : 1), dmg: mini ? 16 : 40, radius };
+    const p = new Point(x, y, { r: mini ? 6 : 9, mass: 0.6, bounce: 0.45, friction: 0.7, group: 'proj' });
+    const g = { kind: 'grenade', p, fuse, maxFuse: fuse, cluster, mini, R: 120 * radius * (mini ? 0.55 : 1), dmg: mini ? 16 : 40, radius };
     p.proj = g;
     p.setVelocity(this.rng.range(-60, 60), -200, this.dt);
     this.world.addPoint(p);
@@ -227,10 +267,8 @@ export class PlayScene {
   }
 
   spawnAnvil(x) {
-    const L = this.layout;
-    const s = this.scale;
-    x = clamp(x, 30 * s, L.w - 30 * s);
-    const p = new Point(x, L.arenaTop + 30 * s, { r: 24 * s, mass: 12, bounce: 0.08, friction: 0.4, gravityScale: 1.7, group: 'proj' });
+    x = clamp(x, 30, this.bounds.right - 30);
+    const p = new Point(x, 30, { r: 24, mass: 12, bounce: 0.08, friction: 0.4, gravityScale: 1.7, group: 'proj' });
     const a = { kind: 'anvil', p, life: 3.2, hits: {} };
     p.proj = a;
     p.setVelocity(0, 400, this.dt);
@@ -284,7 +322,7 @@ export class PlayScene {
     let dx = c.x - x, dy = c.y - y;
     let d = Math.hypot(dx, dy);
     if (d < 8) {
-      dx = x < this.layout.w / 2 ? 1 : -1;
+      dx = x < this.bounds.right / 2 ? 1 : -1;
       dy = -0.4;
       d = Math.hypot(dx, dy);
     }
@@ -304,7 +342,7 @@ export class PlayScene {
     if (!g) return;
     g.p.pinned = false;
     if (throwIt) {
-      const ptr = this.input.pointer;
+      const ptr = this.ptr;
       const sp = Math.hypot(ptr.vx, ptr.vy);
       const k = sp > 4200 ? 4200 / sp : 1;
       g.p.setVelocity(ptr.vx * k * 1.1, ptr.vy * k * 1.1, this.dt);
@@ -322,12 +360,12 @@ export class PlayScene {
       this.grabbed = null;
       return;
     }
-    const ptr = this.input.pointer;
+    const ptr = this.ptr;
     g.ox *= 0.8;
     g.oy *= 0.8;
-    const L = this.layout;
-    const tx = clamp(ptr.x + g.ox, g.p.r, L.w - g.p.r);
-    const ty = clamp(ptr.y + g.oy, L.arenaTop + g.p.r, L.floorY - g.p.r);
+    const B = this.bounds;
+    const tx = clamp(ptr.x + g.ox, g.p.r, B.right - g.p.r);
+    const ty = clamp(ptr.y + g.oy, g.p.r, B.bottom - g.p.r);
     g.p.px = g.p.x;
     g.p.py = g.p.y;
     g.p.x = tx;
@@ -459,7 +497,7 @@ export class PlayScene {
       this.run.totals.kills++;
       this.bonusEvent('kill', {});
       if (this.run.shatter) {
-        this.later(0.05, () => this.explode(c.x, c.y, 150 * this.scale, 30, weaponId, { silentSize: 0.7 }));
+        this.later(0.05, () => this.explode(c.x, c.y, 150, 30, weaponId, { silentSize: 0.7 }));
       }
       if (!this.round.boss) {
         const alive = this.dummies.filter((d) => d.alive).length + this.spawnQueue.reduce((n, q) => n + q.count, 0);
@@ -563,29 +601,55 @@ export class PlayScene {
     if (this.state === 'playing') this.hud.showHint(WEAPONS[id].hint);
   }
 
+  cycleWeapon(dir) {
+    const owned = this.run?.owned ?? [];
+    if (owned.length < 2) return;
+    const i = owned.indexOf(this.weaponId);
+    this.selectWeapon(owned[(i + dir + owned.length) % owned.length]);
+  }
+
   handleInput(dt) {
-    const p = this.input.pointer;
-    for (const key of this.input.keysPressed) {
+    const input = this.input;
+    const p = input.pointer;
+    const owned = this.run?.owned ?? [];
+    for (const key of input.keysPressed) {
       const idx = Number(key) - 1;
-      const owned = this.run?.owned ?? [];
       if (idx >= 0 && idx < owned.length) this.selectWeapon(owned[idx]);
+      else if (key === 'q') this.cycleWeapon(-1);
+      else if (key === 'e') this.cycleWeapon(1);
+      else if (key === 'escape' || key === 'p') {
+        this.pause();
+        return;
+      }
     }
+    if (input.wheel) this.cycleWeapon(input.wheel);
+
     const W = WEAPONS[this.weaponId];
+    const wp = this.ptr;
     if (p.pressed) {
       if (this.hud.isUi(p.x, p.y)) {
         this.pointerOwner = 'ui';
         this.hud.press(p.x, p.y);
+        if (this.engine.top() !== this) return;
       } else {
         this.pointerOwner = 'arena';
-        W.press?.(this, p.x, p.y);
+        W.press?.(this, wp.x, wp.y);
       }
     }
     if (p.down && this.pointerOwner === 'arena') {
-      W.hold?.(this, p.lastX, p.lastY, p.x, p.y, dt);
+      W.hold?.(this, wp.lastX, wp.lastY, wp.x, wp.y, dt);
     }
     if (p.released) {
-      if (this.pointerOwner === 'arena') W.release?.(this, p.x, p.y);
+      if (this.pointerOwner === 'arena') W.release?.(this, wp.x, wp.y);
       this.pointerOwner = null;
+    }
+
+    // Desktop cursor: hidden over the arena (the weapon is drawn instead).
+    if (p.type === 'mouse' && p.inside) {
+      if (this.hud.hoverAt(p.x, p.y)) this.engine.cursor = 'pointer';
+      else if (this.inArena(p.x, p.y)) this.engine.cursor = 'none';
+    } else {
+      this.hud.hoverId = null;
     }
   }
 
@@ -594,6 +658,7 @@ export class PlayScene {
   update(dt, isTop) {
     this.time += dt;
     this.flameAt = null;
+    this.syncPointer();
     if (this.state === 'playing') this.timeLeft -= dt;
     if (this.state === 'playing' && isTop) {
       this.handleInput(dt);
@@ -617,9 +682,8 @@ export class PlayScene {
       if (q.t > 0) continue;
       this.spawnQueue.splice(i, 1);
       if (this.state !== 'playing') continue;
-      const L = this.layout;
       if (q.count === 1) this.spawnDummy();
-      else for (let k = 0; k < q.count; k++) this.spawnDummy(L.w * (0.3 + 0.4 * k));
+      else for (let k = 0; k < q.count; k++) this.spawnDummy(this.bounds.right * (0.3 + 0.4 * k));
     }
 
     for (let i = this.timers.length - 1; i >= 0; i--) {
@@ -749,7 +813,7 @@ export class PlayScene {
       const sp = this.rng.range(80, 380) * spread;
       this.particles.spawn({
         kind: 'fluff', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, gravity: 500, drag: 2.2,
-        size: this.rng.range(2.5, 5.5) * this.scale, color: this.rng.chance(0.85) ? C.fluff : C.paperDim, life: this.rng.range(0.6, 1.4), bounce: 0.1,
+        size: this.rng.range(2.5, 5.5), color: this.rng.chance(0.85) ? C.fluff : C.paperDim, life: this.rng.range(0.6, 1.4), bounce: 0.1,
       });
     }
   }
@@ -777,7 +841,7 @@ export class PlayScene {
     for (let i = 0; i < 3; i++) {
       this.particles.spawn({
         kind: 'fire', x: x + this.rng.range(-6, 6), y: y + this.rng.range(-6, 6),
-        vx: this.rng.range(-90, 90), vy: this.rng.range(-260, -120), drag: 1.5, size: this.rng.range(8, 15) * this.scale,
+        vx: this.rng.range(-90, 90), vy: this.rng.range(-260, -120), drag: 1.5, size: this.rng.range(8, 15),
         color: C.fire, color2: C.fire2, life: this.rng.range(0.25, 0.45),
       });
     }
@@ -789,7 +853,7 @@ export class PlayScene {
     for (let i = 0; i < 18; i++) {
       const a = this.rng.range(0, Math.PI * 2);
       const sp = this.rng.range(100, 500);
-      this.particles.spawn({ kind: 'fire', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 100, drag: 3, size: this.rng.range(10, 22) * this.scale, color: C.fire, color2: C.fire2, life: this.rng.range(0.3, 0.6) });
+      this.particles.spawn({ kind: 'fire', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 100, drag: 3, size: this.rng.range(10, 22), color: C.fire, color2: C.fire2, life: this.rng.range(0.3, 0.6) });
     }
     for (let i = 0; i < 10; i++) {
       const a = this.rng.range(0, Math.PI * 2);
@@ -802,27 +866,35 @@ export class PlayScene {
 
   render(ctx, r) {
     const L = this.layout;
+    const A = L.arena;
+    const B = this.bounds;
     ctx.drawImage(this.bg, 0, 0, L.w, L.h);
+
+    // The arena is drawn in world units, clipped to its rectangle.
     ctx.save();
-    ctx.translate(r.ox, r.oy);
+    ctx.beginPath();
+    ctx.rect(A.x, A.y, A.w, A.h);
+    ctx.clip();
+    ctx.translate(A.x + r.ox, A.y + r.oy);
+    ctx.scale(L.k, L.k);
 
     // Stenciled round number on the padding.
     if (this.round && this.state !== 'title') {
       ctx.save();
-      ctx.font = font(Math.min(L.w * 0.5, (L.floorY - L.arenaTop) * 0.5), F.display, 400);
+      ctx.font = font(Math.min(B.right * 0.5, B.bottom * 0.5), F.display, 400);
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillStyle = 'rgba(40,52,40,0.08)';
-      ctx.fillText(String(this.round.number).padStart(2, '0'), L.w / 2, (L.arenaTop + L.floorY) / 2);
+      ctx.fillText(String(this.round.number).padStart(2, '0'), B.right / 2, B.bottom / 2);
       ctx.restore();
     }
 
     for (const d of this.dummies) {
       const pelvis = d.points.pelvis;
-      const h = clamp((L.floorY - pelvis.y) / 400, 0, 1);
+      const h = clamp((B.bottom - pelvis.y) / 400, 0, 1);
       ctx.fillStyle = `rgba(20,26,20,${0.22 * (1 - h)})`;
       ctx.beginPath();
-      ctx.ellipse(pelvis.x, L.floorY + 2, 40 * d.s * (1 - h * 0.5), 6 * d.s, 0, 0, Math.PI * 2);
+      ctx.ellipse(pelvis.x, B.bottom + 2, 40 * d.s * (1 - h * 0.5), 6 * d.s, 0, 0, Math.PI * 2);
       ctx.fill();
     }
     for (const d of this.dummies) d.draw(ctx);
@@ -830,15 +902,16 @@ export class PlayScene {
     this.renderTrail(ctx);
     this.particles.render(ctx);
     this.renderCursor(ctx);
-    this.renderStamp(ctx);
     ctx.restore();
+
+    this.renderStamp(ctx);
     this.hud.render(ctx);
   }
 
   drawProjectile(ctx, pr) {
     const p = pr.p;
     if (pr.kind === 'grenade') {
-      const size = (pr.mini ? 18 : 26) * this.scale;
+      const size = pr.mini ? 18 : 26;
       drawWeaponIcon(ctx, 'grenade', p.x, p.y, size, { angle: (p.x - p.px) * 0.05 });
       const blink = pr.fuse < 0.5 ? Math.floor(pr.fuse * 20) % 2 : Math.floor(pr.fuse * 6) % 2;
       if (blink) {
@@ -876,22 +949,23 @@ export class PlayScene {
   renderCursor(ctx) {
     if (this.state !== 'playing') return;
     const p = this.input.pointer;
-    if (!p.inside || this.hud.isUi(p.x, p.y)) return;
+    if (!p.inside || !this.inArena(p.x, p.y) || this.hud.isUi(p.x, p.y)) return;
     if (p.type !== 'mouse' && !p.down) return;
-    WEAPONS[this.weaponId].cursor?.(ctx, this, p.x, p.y, p.down);
+    WEAPONS[this.weaponId].cursor?.(ctx, this, this.ptr.x, this.ptr.y, p.down);
   }
 
   renderStamp(ctx) {
     if (!this.stamp) return;
     const L = this.layout;
+    const A = L.arena;
     const t = this.stamp.t;
     const k = t < 0.15 ? 2.2 - (t / 0.15) * 1.2 : 1;
     ctx.save();
-    ctx.translate(L.w / 2, (L.arenaTop + L.floorY) / 2);
+    ctx.translate(A.x + A.w / 2, (A.y + L.floorPx) / 2);
     ctx.rotate(-0.12);
     ctx.scale(k, k);
     ctx.globalAlpha = clamp(t / 0.1, 0, 1);
-    ctx.font = font(Math.min(64, L.w * 0.13), F.display, 400);
+    ctx.font = font(Math.min(72, A.w * 0.13), F.display, 400);
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     const w = ctx.measureText(this.stamp.text).width + 36;

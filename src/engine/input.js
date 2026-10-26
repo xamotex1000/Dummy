@@ -14,7 +14,10 @@ export class Input {
       _ex: 0, _ey: 0, _et: 0,
     };
     this.keysPressed = new Set();
+    this.wheel = 0;
     this.onGesture = null;
+    // Best guess before the first interaction; refined by the pointer type.
+    this.finePointer = typeof matchMedia === 'function' && matchMedia('(pointer: fine)').matches;
 
     canvas.addEventListener('pointerdown', (e) => this._down(e));
     canvas.addEventListener('pointermove', (e) => this._move(e));
@@ -24,6 +27,10 @@ export class Input {
       if (e.pointerType === 'mouse' && !this.pointer.down) this.pointer.inside = false;
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      if (Math.abs(e.deltaY) > 2) this.wheel += Math.sign(e.deltaY);
+    }, { passive: false });
     window.addEventListener('keydown', (e) => {
       this.keysPressed.add(e.key.toLowerCase());
       this.onGesture?.();
@@ -42,6 +49,7 @@ export class Input {
     this.onGesture?.();
     try { this.canvas.setPointerCapture(e.pointerId); } catch { /* capture is optional */ }
     const [x, y] = this._pos(e);
+    this.finePointer = e.pointerType === 'mouse';
     Object.assign(p, {
       x, y, lastX: x, lastY: y, startX: x, startY: y,
       down: true, pressed: true, id: e.pointerId, type: e.pointerType || 'mouse', inside: true,
@@ -100,5 +108,6 @@ export class Input {
       p.speed = Math.hypot(p.vx, p.vy);
     }
     this.keysPressed.clear();
+    this.wheel = 0;
   }
 }

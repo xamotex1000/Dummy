@@ -20,7 +20,7 @@ export function nextUpgrade(id, level) {
 }
 
 function pistolShot(sc, x, y) {
-  const hit = sc.hitAt(x, y, 4 * sc.scale);
+  const hit = sc.hitAt(x, y, 4);
   sc.fxMuzzle(x, y);
   sc.sfx.shot();
   sc.shake(0.12);
@@ -36,13 +36,12 @@ function pistolShot(sc, x, y) {
 }
 
 function swing(sc, id, x0, y0, x1, y1, opts) {
-  const p = sc.input.pointer;
-  const sp = p.speed / Math.max(0.6, sc.scale);
+  const sp = sc.ptr.speed;
   if (sp < opts.minSpeed) return;
   const dl = Math.hypot(x1 - x0, y1 - y0);
   if (dl < 0.5) return;
   const dir = { x: (x1 - x0) / dl, y: (y1 - y0) / dl };
-  for (const hit of sc.hitSwipe(x0, y0, x1, y1, opts.pad * sc.scale)) {
+  for (const hit of sc.hitSwipe(x0, y0, x1, y1, opts.pad)) {
     if (!sc.ready(id + hit.dummy.id, opts.cooldown)) continue;
     opts.onHit(hit, sp, dir);
   }
@@ -60,7 +59,7 @@ export const WEAPONS = {
     ],
     press(sc, x, y) {
       sc.handTap = { t: 0, moved: 0 };
-      const hit = sc.hitAt(x, y, 12 * sc.scale);
+      const hit = sc.hitAt(x, y, 12);
       if (hit) sc.grab(hit, x, y);
     },
     hold(sc, x0, y0, x1, y1, dt) {
@@ -73,7 +72,7 @@ export const WEAPONS = {
       sc.handTap = null;
       sc.releaseGrab(!tap);
       if (!tap) return;
-      const hit = sc.hitAt(x, y, 16 * sc.scale);
+      const hit = sc.hitAt(x, y, 16);
       if (!hit) {
         sc.sfx.whoosh();
         return;
@@ -120,7 +119,7 @@ export const WEAPONS = {
       });
     },
     cursor(ctx, sc, x, y) {
-      const p = sc.input.pointer;
+      const p = sc.ptr;
       const ang = p.speed > 120 ? Math.atan2(p.vy, p.vx) + Math.PI * 0.25 : -0.3;
       drawWeaponIcon(ctx, 'bat', x, y, 70, { angle: ang, alpha: 0.95 });
     },
@@ -152,7 +151,7 @@ export const WEAPONS = {
       });
     },
     cursor(ctx, sc, x, y) {
-      const p = sc.input.pointer;
+      const p = sc.ptr;
       const ang = p.speed > 120 ? Math.atan2(p.vy, p.vx) + Math.PI * 0.25 : 0;
       drawWeaponIcon(ctx, 'knife', x, y, 52, { angle: ang, alpha: 0.95 });
     },
@@ -229,7 +228,7 @@ export const WEAPONS = {
       sc.fxFlame(x1, y1);
       sc.sfx.burn();
       if (!sc.ready('flame', 0.08)) return;
-      const R = 46 * sc.scale;
+      const R = 46;
       for (const d of sc.dummies) {
         if (!d.alive) continue;
         for (const seg of d.segs) {
@@ -263,19 +262,19 @@ export const WEAPONS = {
       if (!sc.ready('anvil', 0.6)) return;
       sc.spawnAnvil(x);
       if (sc.level('anvil') >= 2) {
-        const off = (x > sc.layout.w / 2 ? -1 : 1) * 70 * sc.scale;
+        const off = (x > sc.bounds.right / 2 ? -1 : 1) * 70;
         sc.later(0.12, () => sc.spawnAnvil(x + off));
       }
     },
     cursor(ctx, sc, x) {
-      const top = sc.layout.arenaTop;
+      const top = sc.bounds.top;
       ctx.save();
       ctx.strokeStyle = 'rgba(22,25,21,0.35)';
       ctx.setLineDash([6, 8]);
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(x, top + 30);
-      ctx.lineTo(x, sc.layout.floorY);
+      ctx.lineTo(x, sc.bounds.bottom);
       ctx.stroke();
       ctx.restore();
       drawWeaponIcon(ctx, 'anvil', x, top + 20, 40, { alpha: 0.5 });
