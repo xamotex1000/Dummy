@@ -38,6 +38,10 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
   - **Padded Cell:** normal.
   - **Crash Lab:** low gravity.
   - **Furnace:** flame vents erupt from the floor and set anything above them burning.
+- **Entrances.** Every dummy arrives through the act's entrance, including respawns and the one on the title screen. The clock waits until the first one is in.
+  - **Padded Cell:** a steel cell door in the left wall swings open, an orderly's arm lobs the dummy in tumbling, and the door slams.
+  - **Crash Lab:** a hazard-striped ceiling hatch flashes, opens its flaps, and the dummy falls through.
+  - **Furnace:** a delivery chute in the right wall pops its flap and shoots the dummy out head first.
 - **Routes.** Before each floor you pick the next job from three tickets:
   - **Standard:** a normal dummy; reward is a card pick.
   - **Elite:** a tougher variant with more health and less time; reward is a rare-weighted pick with an extra choice.
@@ -154,6 +158,7 @@ src/
     statuses.js      bleed / burn / freeze / shock / nails, and the reactions between them
     reactions.js     reaction list, codex discovery storage
     projectiles.js   grenades, anvils, rockets, vortexes
+    entrances.js     per-act spawn animations (cell door, ceiling hatch, chute)
     weapons.js       weapon definitions (input handlers, held-weapon physics config, perks)
     objectives.js    objectives, bonus conditions, round and route generation
     cards.js         card pool, rarity weights, offers
@@ -176,6 +181,7 @@ How the main pieces fit together:
   - Finally it records the event: round stats, per-weapon totals and the bonus check.
   - Damage from the arena itself (Furnace vents) hurts dummies but never counts for or against you.
 - **Statuses and reactions** live in `statuses.js`. Weapons go through scene helpers (`addBurn`, `addChill`, `addShock`, `addNail`, `addBleed`), and each reaction is rate-limited per dummy so combos can't loop.
+- **Entrances** start each dummy just outside the arena. `Point.passWall` lets its points through that one wall until the whole body is inside, and the arena clip hides the part still outside.
 - **Tear Away** reads `Stick.strain` from the physics step: how stretched a stick was before the solver corrected it.
 - **Adding content.** Each of these is a single entry:
   - a weapon: `WEAPONS`

@@ -16,6 +16,7 @@ import { starterOffer } from '../cards.js';
 import { Run } from '../run.js';
 import { VARIANTS, ACTS } from '../variants.js';
 import { StatusSystem } from '../statuses.js';
+import { Entrance } from '../entrances.js';
 import {
   spawnGrenade, spawnAnvil, spawnVortex, updateProjectiles, drawProjectile,
   projectileImpact, projectileContact, activeVortexes, collapseVortex,
@@ -90,6 +91,8 @@ export class PlayScene {
     this.combo = { count: 0, t: 0 };
     this.stamp = null;
     this.theme = 'cell';
+    this.entrance = new Entrance(this, 'cell');
+    this.awaitingEntry = false; // the clock waits until the first dummy is in
     this.bestDepth = load('dummy-run-best');
     this.wins = load('dummy-run-wins');
     this.layout = computeLayout(engine.width, engine.height);
@@ -114,6 +117,7 @@ export class PlayScene {
   setTheme(theme) {
     if (theme === this.theme) return;
     this.theme = theme;
+    this.entrance = new Entrance(this, theme);
     this.bg = buildBackground(this.layout, this.engine.renderer.dpr, theme);
   }
 
@@ -164,7 +168,7 @@ export class PlayScene {
     this.setTheme('cell');
     this.world.gravity = GRAVITY;
     this.clearArena();
-    this.spawnDummy();
+    this.queueDummy();
     this.engine.push(new TitleOverlay(this));
   }
 
@@ -227,13 +231,15 @@ export class PlayScene {
     this.world.gravity = GRAVITY * round.env.gravity;
     if (!this.run.weapons[this.weaponId]) this.weaponId = 'hands';
     this.hud.layout();
-    this.spawnWave(round.dummy.count);
     this.state = 'intro';
     this.engine.push(new IntroOverlay(this));
   }
 
+  // Dummies come in through the act's entrance once the player is ready.
   beginPlay() {
     this.state = 'playing';
+    this.awaitingEntry = true;
+    this.spawnWave(this.round.dummy.count);
     this.hud.showHint(WEAPONS[this.weaponId].hint);
   }
 
@@ -311,6 +317,8 @@ export class PlayScene {
 
   clearArena() {
     this.held = null;
+    this.entrance.reset();
+    this.awaitingEntry = false;
     for (const d of this.dummies) d.destroy();
     for (const p of this.projectiles) p.p.dead = true;
     this.dummies = [];
@@ -330,12 +338,25 @@ export class PlayScene {
   // ----------------------------------------------------------------- spawning
 
   spawnWave(count) {
-    const W = this.bounds.right;
-    if (count <= 1) this.spawnDummy();
-    else for (let k = 0; k < count; k++) this.spawnDummy(W * (0.25 + (0.5 * k) / (count - 1)));
+    for (let k = 0; k < count; k++) this.queueDummy();
   }
 
-  spawnDummy(x, { variant, hp, y } = {}) {
+  // Send a dummy in through the entrance (door, hatch or chute).
+  queueDummy() {
+    const rd = this.round?.dummy ?? { hp: 100, variant: 'standard' };
+    this.entrance.enqueue({
+      variant: rd.variant,
+      hp: rd.hp,
+      scale: VARIANTS[rd.variant].scale ?? 1,
+      onSpawn: () => {
+        this.awaitingEntry = false;
+      },
+    });
+  }
+
+  // Create a dummy right away. `raw` skips keeping it inside the walls, for
+  // entrances that start it outside the arena.
+  spawnDummy(x, { variant, hp, y, raw = false } = {}) {
     const W = this.bounds.right;
     const rd = this.round?.dummy ?? { hp: 100, variant: 'standard' };
     variant = variant ?? rd.variant;
@@ -344,7 +365,7 @@ export class PlayScene {
     const run = this.run;
     const margin = 60 * s;
     x = x ?? W / 2 + this.rng.range(-0.12, 0.12) * Math.min(W, 700);
-    x = clamp(x, margin, Math.max(margin, W - margin));
+    if (!raw) x = clamp(x, margin, Math.max(margin, W - margin));
     y = y ?? 126 * s;
     const d = new Dummy(this.world, x, y, {
       scale: s,
@@ -630,10 +651,10 @@ export class PlayScene {
         this.later(0.05, () => this.explode(c.x, c.y, 150, 30, weaponId, { size: 0.7, noReactions: true }));
       }
       if (!this.round.boss) {
-        const alive = this.dummies.filter((d) => d.alive).length + this.spawnQueue.reduce((n, q) => n + q.count, 0);
+        const alive = this.dummies.filter((d) => d.alive).length + this.spawnQueue.reduce((n, q) => n + q.count, 0) + this.entrance.queue.length;
         const count = this.rng.chance(this.run.hydraChance) ? 2 : 1;
         const room = Math.max(0, 4 - alive);
-        if (room > 0) this.spawnQueue.push({ t: 0.9, count: Math.min(count, room) });
+        if (room > 0) this.spawnQueue.push({ t: 0.5, count: Math.min(count, room) });
       }
     }
   }
@@ -818,7 +839,7 @@ export class PlayScene {
   update(dt, isTop) {
     this.time += dt;
     this.syncPointer();
-    if (this.state === 'playing') this.timeLeft -= dt;
+    if (this.state === 'playing' && !this.awaitingEntry) this.timeLeft -= dt;
     if (this.state === 'playing' && isTop) {
       // Move the held weapon first so a press fires from where it is now.
       this.updateHeld(dt);
@@ -835,7 +856,11 @@ export class PlayScene {
     this.world.step(dt);
     updateProjectiles(this, dt);
 
-    for (const d of this.dummies) d.update(dt);
+    this.entrance.update(dt);
+    for (const d of this.dummies) {
+      d.update(dt);
+      d.updateEntry(dt, this.bounds);
+    }
     this.dummies = this.dummies.filter((d) => !d.gone);
 
     for (let i = this.spawnQueue.length - 1; i >= 0; i--) {
@@ -1088,6 +1113,7 @@ export class PlayScene {
     }
 
     this.renderVent(ctx);
+    this.entrance.draw(ctx, 'back');
     for (const d of this.dummies) {
       const pelvis = d.points.pelvis;
       const h = clamp((B.bottom - pelvis.y) / 400, 0, 1);
@@ -1098,6 +1124,7 @@ export class PlayScene {
     }
     for (const d of this.dummies) d.draw(ctx);
     for (const pr of this.projectiles) drawProjectile(this, ctx, pr);
+    this.entrance.draw(ctx, 'front');
     this.renderTrail(ctx);
     this.renderBeam(ctx);
     this.particles.render(ctx);

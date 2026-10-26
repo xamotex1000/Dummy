@@ -15,6 +15,7 @@ export class Point {
     this.group = group; // points in the same group never collide with each other
     this.solid = solid; // non-solid points only collide with the world bounds
     this.pinned = false; // pinned points are moved by hand and ignore integration
+    this.passWall = null; // 'top' | 'bottom' | 'left' | 'right': that wall lets this point through
     this.dead = false;
     this.impactCd = 0;
     this.owner = null;
@@ -120,14 +121,15 @@ export class World {
     const b = this.bounds;
     const vx = p.x - p.px;
     const vy = p.y - p.py;
-    if (p.y + p.r > b.bottom) {
+    const w = p.passWall;
+    if (p.y + p.r > b.bottom && w !== 'bottom') {
       p.y = b.bottom - p.r;
       if (respond && vy > 0) {
         this.onImpact?.(p, vy / dt, 0, -1);
         p.py = p.y + vy * p.bounce;
         p.px = p.x - vx * p.friction;
       }
-    } else if (p.y - p.r < b.top) {
+    } else if (p.y - p.r < b.top && w !== 'top') {
       p.y = b.top + p.r;
       if (respond && vy < 0) {
         this.onImpact?.(p, -vy / dt, 0, 1);
@@ -135,14 +137,14 @@ export class World {
         p.px = p.x - vx * p.friction;
       }
     }
-    if (p.x - p.r < b.left) {
+    if (p.x - p.r < b.left && w !== 'left') {
       p.x = b.left + p.r;
       if (respond && vx < 0) {
         this.onImpact?.(p, -vx / dt, 1, 0);
         p.px = p.x + vx * p.bounce;
         p.py = p.y - vy * p.friction;
       }
-    } else if (p.x + p.r > b.right) {
+    } else if (p.x + p.r > b.right && w !== 'right') {
       p.x = b.right - p.r;
       if (respond && vx > 0) {
         this.onImpact?.(p, vx / dt, -1, 0);

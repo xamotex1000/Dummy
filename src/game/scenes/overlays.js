@@ -249,7 +249,7 @@ const CONTROLS = [
   ['MOVE', 'Swing the bat and knife. They pivot from your grip'],
   ['CLICK', 'Punch, fire guns, drop grenades and anvils'],
   ['DRAG', 'Grab and throw the dummy with Hands'],
-  ['1-7 / WHEEL', 'Switch weapon'],
+  ['1-6 / WHEEL', 'Switch weapon'],
   ['ESC', 'Pause'],
 ];
 
