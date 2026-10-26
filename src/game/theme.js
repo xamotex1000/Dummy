@@ -33,6 +33,9 @@ export const C = {
   fire: '#ff8a1f',
   fire2: '#d43b12',
   steel: '#d5dbe0',
+  ice: '#9fdcff',
+  volt: '#7cf7ff',
+  vortex: '#b57cff',
   iron: '#555a60',
   wood: '#c8874a',
   olive: '#5d7a3a',
@@ -45,6 +48,8 @@ export const RGB = {
   bruise: hexToRgb(C.bruise),
   char: hexToRgb(C.char),
   white: [255, 255, 255],
+  ice: hexToRgb('#a9dcf5'),
+  volt: hexToRgb('#7cf7ff'),
 };
 
 export const F = {

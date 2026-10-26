@@ -44,6 +44,7 @@ export class Stick {
     this.stiffness = stiffness;
     this.minOnly = minOnly; // only pushes apart, never pulls together
     this.broken = false;
+    this.strain = 1; // length / rest length this step, before the solver corrected it
   }
 
   solve() {
@@ -107,6 +108,7 @@ export class World {
     // the solver iterations below only correct positions.
     for (const p of this.points) this.collideBounds(p, dt, !p.pinned);
     this.collidePoints(dt, true);
+    for (const s of this.sticks) s.strain = Math.hypot(s.b.x - s.a.x, s.b.y - s.a.y) / (s.length || 1);
     for (let i = 0; i < this.iterations; i++) {
       for (const s of this.sticks) s.solve();
       for (const p of this.points) this.collideBounds(p, dt, false);
