@@ -13,7 +13,22 @@ python3 -m http.server 8000
 # then open http://localhost:8000
 ```
 
-It's built touch-first and plays on a phone browser. On desktop, use the mouse. Number keys switch weapons, and Enter/Space confirm dialogs. On the card screen, 1–5 pick a card and R rerolls.
+It's designed desktop-first and adapts down to phones:
+
+- **Desktop (900px wide and up):** a clipboard sidebar holds the round, timer, work order, bonus, your arsenal and the cards you've taken. The arena fills the rest of the screen. Menus and card drafts sit over the arena, so the sidebar stays readable while you choose.
+- **Phone, portrait:** a top strip with the work order, and a weapon rack along the bottom.
+- **Phone, landscape:** a two-row strip, and the arena zooms in so the dummy stays readable.
+
+The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
+
+| Desktop | Phone | Action |
+| --- | --- | --- |
+| Click | Tap | Punch, shoot, drop a grenade or anvil |
+| Drag | Drag | Grab and throw, or swing the bat and knife |
+| 1–7, Q/E, mouse wheel | Weapon rack | Switch weapon |
+| Esc or P | Pause button | Pause (also happens automatically when the window loses focus) |
+| Space / Enter | Tap | Confirm dialogs |
+| 1–5, R | Tap | Pick a card, reroll |
 
 ## How a run works
 
@@ -71,12 +86,13 @@ src/
     objectives.js    primary objectives, bonus conditions, round generation
     cards.js         card pool, rarity weights, offers
     run.js           state that persists across a run
-    hud.js           top objective strip and bottom weapon rack
+    hud.js           desktop sidebar, or a top strip + weapon rack on phones
+    layout.js        desktop-first screen layout and the world-unit scale
     background.js    pre-rendered padded-cell backdrop
     icons.js         vector weapon icons
     sfx.js, theme.js
     scenes/play.js   the arena: damage pipeline, physics callbacks, round lifecycle
-    scenes/overlays.js  title, work order, results, card draft, game over
+    scenes/overlays.js  title, work order, results, card draft, pause, game over
   main.js
 ```
 
