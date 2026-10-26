@@ -4,21 +4,36 @@
 
 import { Point, Stick } from '../engine/physics.js';
 import { capsulePath } from '../engine/renderer.js';
-import { closestOnSegment, segmentDistance, mixRgb, clamp } from '../engine/math.js';
+import { closestOnSegment, segmentDistance, clamp, hexToRgb } from '../engine/math.js';
 import { C, RGB } from './theme.js';
+import { VARIANTS } from './variants.js';
 
 let nextId = 1;
 
 export const GROUPS = ['head', 'torso', 'arms', 'legs'];
 
 export class Dummy {
-  constructor(world, x, y, { scale = 1, hp = 100, limbFragility = 1, bounce = 0.25, boss = false } = {}) {
+  constructor(world, x, y, { scale = 1, hp = 100, limbFragility = 1, bounce = 0.25, variant = 'standard' } = {}) {
+    const v = VARIANTS[variant] ?? VARIANTS.standard;
     this.id = nextId++;
     this.world = world;
     this.s = scale;
     this.maxHp = hp;
     this.hp = hp;
-    this.boss = boss;
+    this.variant = variant;
+    this.traits = v;
+    this.boss = !!v.boss;
+    this.impactMult = v.impactMult ?? 1;
+    bounce = v.bounce ?? bounce;
+    // Armor soaks hits to the head and torso until it has taken its share.
+    this.armor = v.armor ? { head: hp * v.armor, torso: hp * v.armor, max: hp * v.armor } : null;
+    this.balloon = v.balloon ? { hp: hp * 0.12, popped: false } : null;
+    this.nails = [];
+    this.shockT = 0;
+    // Impact bookkeeping: one impact per dummy at a time, and each bounce
+    // after a throw is worth half the last.
+    this.impactUntil = 0;
+    this.impactChain = 0;
     this.alive = true;
     this.deadT = 0;
     this.gone = false;
@@ -29,7 +44,7 @@ export class Dummy {
     this.lastHitT = -99;
     this.statuses = new Map();
     this.sticks = [];
-    this.baseRgb = boss ? RGB.burlapBoss : RGB.burlap;
+    this.baseRgb = v.color ? hexToRgb(v.color) : this.boss ? RGB.burlapBoss : RGB.burlap;
 
     const s = scale;
     const group = 'dummy' + this.id;
@@ -67,6 +82,17 @@ export class Dummy {
     // Keep knees and feet from folding through each other.
     L(lKn, rKn, { minOnly: true, length: 12 * s });
     L(lFt, rFt, { minOnly: true, length: 10 * s });
+    // A helium head lifts the whole body (gravity here is per-point acceleration).
+    if (this.balloon) head.gravityScale = -12;
+
+    this.sticksByPoint = new Map();
+    for (const st of this.sticks) {
+      if (st.minOnly) continue;
+      for (const p of [st.a, st.b]) {
+        if (!this.sticksByPoint.has(p)) this.sticksByPoint.set(p, []);
+        this.sticksByPoint.get(p).push(st);
+      }
+    }
 
     const limbHp = (hp * 0.32) / limbFragility;
     this.limbs = {
@@ -76,7 +102,7 @@ export class Dummy {
       rLeg: { root: rLegRoot, joint: rHip, side: -1, top: false, hp: limbHp, max: limbHp, severed: false },
     };
 
-    const seg = (name, a, b, r, group, limb = null) => ({ name, a, b, r: r * s, group, limb, dmg: 0, char: 0 });
+    const seg = (name, a, b, r, group, limb = null) => ({ name, a, b, r: r * s, group, limb, dmg: 0, char: 0, chill: 0, frozen: 0 });
     const segs = {
       lThigh: seg('lThigh', lHip, lKn, 9, 'legs', 'lLeg'),
       lShin: seg('lShin', lKn, lFt, 8, 'legs', 'lLeg'),
@@ -165,9 +191,30 @@ export class Dummy {
     seg.b.addVelocity(vx * wb * k, vy * wb * k, dt);
   }
 
-  applyDamage(seg, amount, { limbMult = 1 } = {}) {
-    const res = { killed: false, severed: null };
+  isBleeding() {
+    for (const key of this.statuses.keys()) if (key.startsWith('bleed:')) return true;
+    return false;
+  }
+
+  // Returns what actually landed after armor, plus anything that broke.
+  applyDamage(seg, amount, { limbMult = 1, pierce = false } = {}) {
+    const res = { killed: false, severed: null, dealt: amount, armorBroken: null, popped: false };
     if (!this.alive) return res;
+    const g = seg.group;
+    if (this.armor && !pierce && (g === 'head' || g === 'torso') && this.armor[g] > 0) {
+      this.armor[g] -= amount;
+      amount *= 0.4;
+      res.dealt = amount;
+      if (this.armor[g] <= 0) res.armorBroken = g;
+    }
+    if (this.balloon && !this.balloon.popped && g === 'head') {
+      this.balloon.hp -= amount;
+      if (this.balloon.hp <= 0) {
+        this.balloon.popped = true;
+        this.points.head.gravityScale = 1;
+        res.popped = true;
+      }
+    }
     this.hp -= amount;
     seg.dmg += amount;
     this.flash = 0.08;
@@ -222,6 +269,10 @@ export class Dummy {
     this.age += dt;
     this.flash = Math.max(0, this.flash - dt);
     this.ouch = Math.max(0, this.ouch - dt);
+    this.shockT = Math.max(0, this.shockT - dt);
+    if (this.alive && this.traits.regen && !this.isBleeding()) {
+      this.hp = Math.min(this.maxHp, this.hp + this.traits.regen * this.maxHp * dt);
+    }
     if (!this.alive) {
       this.deadT += dt;
       if (this.deadT > 2.2) this.destroy();
@@ -236,24 +287,28 @@ export class Dummy {
     for (const seg of this.segs) {
       if (seg.name === 'head') continue;
       this.drawSeg(ctx, seg);
-      if (seg.name === 'torso') this.drawTorsoDetail(ctx, seg);
+      if (seg.name === 'torso') {
+        this.drawTorsoDetail(ctx, seg);
+        if (this.armor?.torso > 0) this.drawVest(ctx, seg);
+      }
     }
     this.drawSockets(ctx);
     this.drawHead(ctx, this.segMap.head);
+    this.drawNails(ctx);
+    if (this.shockT > 0 && this.alive) this.drawArcs(ctx);
     ctx.restore();
     if (this.alive && this.hp < this.maxHp) this.drawHealth(ctx);
   }
 
+  // Base burlap, then bruising, scorching, ice, electricity and hit flash.
   segColor(seg) {
-    const bruise = clamp(seg.dmg / (this.maxHp * 0.45), 0, 1) * 0.8;
-    let col = mixRgb(this.baseRgb, RGB.bruise, bruise);
-    if (seg.char > 0 || this.flash > 0) {
-      // Recompute from components when layering effects.
-      const base = this.baseRgb.map((v, i) => v + (RGB.bruise[i] - v) * bruise);
-      const charred = base.map((v, i) => v + (RGB.char[i] - v) * clamp(seg.char, 0, 0.7));
-      col = mixRgb(charred, RGB.white, this.flash > 0 ? 0.45 : 0);
-    }
-    return col;
+    const mix = (c, to, t) => c.map((v, i) => v + (to[i] - v) * t);
+    let c = mix(this.baseRgb, RGB.bruise, clamp(seg.dmg / (this.maxHp * 0.45), 0, 1) * 0.8);
+    if (seg.char > 0) c = mix(c, RGB.char, clamp(seg.char, 0, 0.7));
+    if (seg.frozen > 0) c = mix(c, RGB.ice, 0.65);
+    if (this.shockT > 0 && Math.random() < 0.5) c = mix(c, RGB.volt, 0.6);
+    if (this.flash > 0) c = mix(c, RGB.white, 0.45);
+    return `rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
   }
 
   drawSeg(ctx, seg) {
@@ -261,7 +316,81 @@ export class Dummy {
     ctx.fillStyle = this.segColor(seg);
     ctx.fill();
     ctx.lineWidth = 2.5 * this.s;
-    ctx.strokeStyle = C.seam;
+    ctx.strokeStyle = seg.frozen > 0 ? '#5a8fae' : C.seam;
+    ctx.stroke();
+    if (seg.frozen > 0) {
+      // Frost glints.
+      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+      ctx.lineWidth = 1.5 * this.s;
+      ctx.beginPath();
+      const mx = (seg.a.x + seg.b.x) / 2, my = (seg.a.y + seg.b.y) / 2;
+      ctx.moveTo(mx - seg.r * 0.5, my - seg.r * 0.3);
+      ctx.lineTo(mx + seg.r * 0.2, my - seg.r * 0.6);
+      ctx.stroke();
+    }
+  }
+
+  drawVest(ctx, seg) {
+    const s = this.s;
+    const ax = seg.a.x + (seg.b.x - seg.a.x) * 0.12, ay = seg.a.y + (seg.b.y - seg.a.y) * 0.12;
+    const bx = seg.a.x + (seg.b.x - seg.a.x) * 0.72, by = seg.a.y + (seg.b.y - seg.a.y) * 0.72;
+    capsulePath(ctx, ax, ay, bx, by, seg.r * 1.06);
+    ctx.fillStyle = '#596067';
+    ctx.fill();
+    ctx.lineWidth = 2 * s;
+    ctx.strokeStyle = C.ink;
+    ctx.stroke();
+    ctx.fillStyle = '#9aa1a8';
+    for (const t of [0.2, 0.5, 0.8]) {
+      ctx.beginPath();
+      ctx.arc(ax + (bx - ax) * t, ay + (by - ay) * t, 1.8 * s, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    if (this.armor.torso < this.armor.max * 0.5) this.drawCrack(ctx, (ax + bx) / 2, (ay + by) / 2, seg.r);
+  }
+
+  drawCrack(ctx, x, y, r) {
+    ctx.strokeStyle = 'rgba(20,20,20,0.8)';
+    ctx.lineWidth = 1.5 * this.s;
+    ctx.beginPath();
+    ctx.moveTo(x - r * 0.6, y - r * 0.2);
+    ctx.lineTo(x - r * 0.1, y + r * 0.1);
+    ctx.lineTo(x + r * 0.2, y - r * 0.3);
+    ctx.lineTo(x + r * 0.6, y + r * 0.2);
+    ctx.stroke();
+  }
+
+  drawNails(ctx) {
+    for (const n of this.nails) {
+      ctx.fillStyle = '#b8bec4';
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, 3.6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.7)';
+      ctx.beginPath();
+      ctx.arc(n.x - 1, n.y - 1, 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Crackling arcs between random body points while shocked.
+  drawArcs(ctx) {
+    const pts = this.pointList;
+    ctx.strokeStyle = C.volt;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let k = 0; k < 3; k++) {
+      const a = pts[Math.floor(Math.random() * pts.length)];
+      const b = pts[Math.floor(Math.random() * pts.length)];
+      ctx.moveTo(a.x, a.y);
+      for (let i = 1; i <= 4; i++) {
+        const t = i / 4;
+        ctx.lineTo(a.x + (b.x - a.x) * t + (Math.random() - 0.5) * 14, a.y + (b.y - a.y) * t + (Math.random() - 0.5) * 14);
+      }
+    }
     ctx.stroke();
   }
 
@@ -331,7 +460,28 @@ export class Dummy {
   drawHead(ctx, seg) {
     const s = this.s;
     const { head, neck } = this.points;
-    this.drawSeg(ctx, seg);
+    if (this.balloon && !this.balloon.popped) {
+      // A string back to the neck and a shiny balloon for a head.
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(neck.x, neck.y);
+      ctx.quadraticCurveTo((neck.x + head.x) / 2 + 6, (neck.y + head.y) / 2, head.x, head.y + seg.r);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.ellipse(head.x, head.y, seg.r * 1.05, seg.r * 1.2, 0, 0, Math.PI * 2);
+      ctx.fillStyle = this.flash > 0 ? '#ff9a90' : '#e2483d';
+      ctx.fill();
+      ctx.lineWidth = 2.5 * s;
+      ctx.strokeStyle = '#7d1d17';
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      ctx.beginPath();
+      ctx.ellipse(head.x - seg.r * 0.4, head.y - seg.r * 0.5, seg.r * 0.22, seg.r * 0.35, -0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      this.drawSeg(ctx, seg);
+    }
     const ang = this.alive ? Math.atan2(head.y - neck.y, head.x - neck.x) + Math.PI / 2 : this.age * 3;
     ctx.save();
     ctx.translate(head.x, head.y);
@@ -376,6 +526,22 @@ export class Dummy {
     };
     eye(-7.5 * s, !this.alive);
     eye(7.5 * s, hurt);
+    if (this.armor?.head > 0) {
+      // Riot helmet with a visor line.
+      ctx.beginPath();
+      ctx.arc(0, 0, seg.r * 1.12, Math.PI * 1.05, Math.PI * 1.95);
+      ctx.lineTo(seg.r * 1.1, -seg.r * 0.1);
+      ctx.lineTo(-seg.r * 1.1, -seg.r * 0.1);
+      ctx.closePath();
+      ctx.fillStyle = '#596067';
+      ctx.fill();
+      ctx.lineWidth = 2 * s;
+      ctx.strokeStyle = C.ink;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(150,200,230,0.5)';
+      ctx.fillRect(-seg.r * 0.8, -seg.r * 0.38, seg.r * 1.6, seg.r * 0.22);
+      if (this.armor.head < this.armor.max * 0.5) this.drawCrack(ctx, 0, -seg.r * 0.7, seg.r * 0.8);
+    }
 
     ctx.strokeStyle = C.stitch;
     ctx.lineWidth = 1.8 * s;

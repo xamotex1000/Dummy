@@ -68,6 +68,54 @@ export class Sfx {
     this.a.noise({ dur: 0.12, type: 'bandpass', freq: 700 + Math.random() * 500, q: 0.7, gain: 0.14 });
   }
 
+  zap() {
+    if (!this.a.throttle('zap', 60)) return;
+    this.a.tone({ freq: 1800, freqEnd: 600, dur: 0.12, gain: 0.12, type: 'sawtooth' });
+    this.a.noise({ dur: 0.1, type: 'highpass', freq: 3000, gain: 0.25 });
+  }
+
+  saw() {
+    if (!this.a.throttle('saw', 70)) return;
+    this.a.tone({ freq: 110 + Math.random() * 20, dur: 0.09, gain: 0.12, type: 'sawtooth' });
+    this.a.noise({ dur: 0.08, type: 'bandpass', freq: 1600, q: 1.5, gain: 0.12 });
+  }
+
+  nail() {
+    if (!this.a.throttle('nail', 40)) return;
+    this.a.noise({ dur: 0.05, type: 'highpass', freq: 2200, gain: 0.4 });
+    this.a.tone({ freq: 700, freqEnd: 300, dur: 0.05, gain: 0.12, type: 'square' });
+  }
+
+  freeze() {
+    this.a.tone({ freq: 1500, freqEnd: 2600, dur: 0.18, gain: 0.08, type: 'sine' });
+    this.a.noise({ dur: 0.15, type: 'highpass', freq: 5000, gain: 0.2 });
+  }
+
+  freezeBeam() {
+    if (!this.a.throttle('freezeBeam', 110)) return;
+    this.a.tone({ freq: 900 + Math.random() * 200, dur: 0.12, gain: 0.04, type: 'sine' });
+  }
+
+  shatter() {
+    this.a.noise({ dur: 0.35, type: 'highpass', freq: 3500, freqEnd: 1500, gain: 0.6 });
+    [2100, 2900, 3700].forEach((f, i) => this.a.tone({ freq: f, dur: 0.12, gain: 0.05, type: 'triangle', delay: i * 0.03 }));
+  }
+
+  rocket() {
+    this.a.noise({ dur: 0.35, freq: 800, freqEnd: 3000, gain: 0.5 });
+    this.a.tone({ freq: 160, freqEnd: 90, dur: 0.2, gain: 0.3, type: 'triangle' });
+  }
+
+  vortex() {
+    this.a.tone({ freq: 60, freqEnd: 180, dur: 1.4, gain: 0.25, type: 'sawtooth' });
+    this.a.tone({ freq: 90, freqEnd: 40, dur: 1.4, gain: 0.2, type: 'sine' });
+  }
+
+  reaction() {
+    if (!this.a.throttle('reaction', 120)) return;
+    [392, 494, 587, 784].forEach((f, i) => this.a.tone({ freq: f, dur: 0.14, gain: 0.12, type: 'square', delay: i * 0.035 }));
+  }
+
   select() {
     this.a.tone({ freq: 880, dur: 0.04, gain: 0.08, type: 'square' });
   }

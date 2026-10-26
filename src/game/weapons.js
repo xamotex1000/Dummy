@@ -5,11 +5,16 @@
 // tick the hand is in the arena.
 
 import { clamp, lerp, segmentDistance } from '../engine/math.js';
+import { spawnRocket } from './projectiles.js';
 import { drawWeaponIcon } from './icons.js';
 import { C } from './theme.js';
 
-export const WEAPON_ORDER = ['hands', 'bat', 'knife', 'pistol', 'grenade', 'flame', 'anvil'];
+export const WEAPON_ORDER = ['hands', 'bat', 'knife', 'chainsaw', 'pistol', 'nailgun', 'taser', 'freeze', 'rocket', 'flame', 'grenade', 'vortex', 'anvil'];
 export const MAX_LEVEL = 5;
+// Hands plus five: a full arsenal means dropping something to take a new one.
+export const MAX_SLOTS = 6;
+// What a run can start with (besides Hands).
+export const STARTERS = ['bat', 'knife', 'pistol', 'nailgun', 'taser', 'chainsaw'];
 
 // Levels 2 and 3 grant the weapon's perks; 4 and 5 add raw damage.
 export const weaponDamageMult = (level) => 1 + 0.3 * Math.max(0, level - 3);
@@ -110,6 +115,110 @@ function pistolShot(sc) {
 function firePistol(sc) {
   pistolShot(sc);
   if (sc.level('pistol') >= 3) sc.later(0.09, () => pistolShot(sc));
+}
+
+
+// First dummy hit along a ray, if any.
+function rayHit(sc, x, y, ux, uy, range = 2400) {
+  let best = null;
+  for (const d of sc.dummies) {
+    const h = d.hitSwipe(x, y, x + ux * range, y + uy * range, 0);
+    if (h && (!best || h.s < best.s)) best = h;
+  }
+  return best;
+}
+
+function heldGun(sc, id) {
+  const held = sc.held;
+  if (!held?.active || sc.weaponId !== id) return null;
+  return { held, m: muzzleOf(held, WEAPONS[id].held.muzzle) };
+}
+
+function fireNails(sc) {
+  const g = heldGun(sc, 'nailgun');
+  if (!g) return;
+  const { held, m } = g;
+  const framing = sc.level('nailgun') >= 2;
+  const spread = sc.level('nailgun') >= 3 ? [-0.09, 0, 0.09] : [0];
+  for (const da of spread) {
+    const a = Math.atan2(m.uy, m.ux) + da;
+    const ux = Math.cos(a), uy = Math.sin(a);
+    const hit = rayHit(sc, m.x, m.y, ux, uy);
+    const end = hit ?? sc.rayExit(m.x, m.y, ux, uy);
+    sc.particles.spawn({ kind: 'beam', x: m.x, y: m.y, x2: end.x, y2: end.y, size: 1.5, color: C.paperDim, life: 0.07 });
+    if (!hit) continue;
+    const { dummy: d, seg } = hit;
+    const point = seg.a === seg.b || hit.t < 0.5 ? seg.a : seg.b;
+    sc.dealDamage(d, seg, framing ? 9 : 6, 'nailgun', { x: hit.x, y: hit.y });
+    sc.addNail(d, point, framing ? 12 : 6);
+    sc.fxSparks(hit.x, hit.y, 4, C.paperDim);
+  }
+  sc.sfx.nail();
+  held.kick(-Math.sign(m.ux || 1) * WEAPONS.nailgun.held.recoil);
+}
+
+function zap(sc) {
+  const g = heldGun(sc, 'taser');
+  if (!g || !sc.ready('taser', 0.2)) return;
+  const { m } = g;
+  sc.fxSparks(m.x, m.y, 5, C.volt);
+  sc.sfx.zap();
+  let hit = null;
+  for (const d of sc.dummies) {
+    const h = d.hitSwipe(m.x - m.ux * 14, m.y - m.uy * 14, m.x + m.ux * 6, m.y + m.uy * 6, 10);
+    if (h) hit = h;
+  }
+  if (!hit) {
+    sc.fxArc(m.x, m.y, m.x + m.ux * 14, m.y + m.uy * 14);
+    return;
+  }
+  const d = hit.dummy;
+  sc.fxArc(m.x, m.y, hit.x, hit.y);
+  sc.dealDamage(d, hit.seg, 9, 'taser', { x: hit.x, y: hit.y });
+  sc.addShock(d, 'taser', hit.seg);
+  // The charge jumps to the nearest other dummies.
+  const jumps = sc.level('taser') >= 2 ? 3 : 1;
+  const c = d.center();
+  const others = sc.dummies
+    .filter((o) => o !== d && o.alive)
+    .map((o) => ({ o, dist: Math.hypot(o.center().x - c.x, o.center().y - c.y) }))
+    .filter((e) => e.dist < 220)
+    .sort((a, b) => a.dist - b.dist)
+    .slice(0, jumps);
+  let from = c;
+  for (const { o } of others) {
+    const oc = o.center();
+    sc.fxArc(from.x, from.y, oc.x, oc.y);
+    sc.dealDamage(o, o.segMap.torso, 6, 'taser', { x: oc.x, y: oc.y });
+    sc.addShock(o, 'taser', o.segMap.torso);
+    from = oc;
+  }
+}
+
+function freezeBeam(sc) {
+  const g = heldGun(sc, 'freeze');
+  if (!g) return;
+  const { m } = g;
+  const cfg = WEAPONS.freeze.held;
+  const hit = rayHit(sc, m.x, m.y, m.ux, m.uy, cfg.range);
+  const end = hit ?? { x: m.x + m.ux * cfg.range, y: m.y + m.uy * cfg.range };
+  sc.beam = { x: m.x, y: m.y, x2: end.x, y2: end.y, t: sc.time };
+  sc.sfx.freezeBeam();
+  if (!hit) return;
+  const d = hit.dummy;
+  if (sc.ready('chill' + d.id, 0.1)) sc.addChill(d, hit.seg, sc.level('freeze') >= 2 ? 0.2 : 0.11, 'freeze');
+  if (sc.ready('freezeDmg' + d.id, 0.25)) sc.dealDamage(d, hit.seg, 2, 'freeze', { kind: 'grind', x: hit.x, y: hit.y });
+  if (sc.rng.chance(0.5)) sc.fxShards(hit.x, hit.y, 1);
+}
+
+function fireRocket(sc) {
+  const g = heldGun(sc, 'rocket');
+  if (!g) return;
+  const { held, m } = g;
+  spawnRocket(sc, m, held, { napalm: sc.level('rocket') >= 2 });
+  sc.fxMuzzle(m.x, m.y);
+  sc.shake(0.2);
+  held.kick(-Math.sign(m.ux || 1) * WEAPONS.rocket.held.recoil);
 }
 
 export const WEAPONS = {
@@ -300,6 +409,163 @@ export const WEAPONS = {
           d.impulse(seg, r.t, m.ux * 90, m.uy * 90 - 60, sc.dt);
         }
       }
+    },
+  },
+
+  chainsaw: {
+    name: 'Chainsaw',
+    phrase: 'the chainsaw',
+    hint: 'Held by the handle. Hold to run the motor and grind through whatever the blade touches.',
+    desc: 'Hold to run it. Grinds through anything the blade touches and causes heavy bleeding.',
+    unlockRarity: 'rare',
+    perks: [
+      { name: 'Ripper', desc: 'Tears limbs off twice as fast.' },
+      { name: 'Overclock', desc: '+60% grinding damage, and the blade drags dummies in.' },
+    ],
+    held: {
+      body: { length: 74, com: 0.5, stiffness: 140, damping: 14, gravityComp: 0.85, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0.25 : Math.PI - 0.25),
+      strike: { s0: 20, s1: 74, pad: 5, minSpeed: Infinity, cooldown: 0.2, bounce: 1 },
+    },
+    heldUpdate(sc, held) {
+      const cfg = this.held.strike;
+      const running = sc.input.pointer.down && sc.pointerOwner === 'arena';
+      if (!running) {
+        meleeSweep(sc, 'chainsaw', held, cfg, () => {}); // idle: the bar only shoves
+        return;
+      }
+      held.angle += sc.rng.range(-0.025, 0.025); // motor judder
+      sc.sfx.saw();
+      const over = sc.level('chainsaw') >= 3;
+      const a = held.pointAt(cfg.s0);
+      const b = held.pointAt(cfg.s1);
+      for (const d of sc.dummies) {
+        if (!d.alive) continue;
+        const hit = d.hitSwipe(a.x, a.y, b.x, b.y, cfg.pad);
+        if (!hit) continue;
+        sc.fxSparks(hit.x, hit.y, 2, C.gold);
+        if (over) {
+          const on = held.pointAt(cfg.s0 + hit.s * (cfg.s1 - cfg.s0));
+          sc.push(hit, (on.x - hit.x) * 6, (on.y - hit.y) * 6);
+        }
+        if (!sc.ready('saw' + d.id, 0.1)) continue;
+        sc.dealDamage(d, hit.seg, 3.6 * (over ? 1.6 : 1), 'chainsaw', { kind: 'grind', x: hit.x, y: hit.y, limbMult: sc.level('chainsaw') >= 2 ? 2 : 1 });
+        sc.addBleed(d, hit.seg, 2, 3, 'chainsaw');
+        sc.fxFluff(hit.x, hit.y, 2, 0.8);
+      }
+    },
+  },
+
+  nailgun: {
+    name: 'Nail Gun',
+    phrase: 'the nail gun',
+    hint: 'Held by the grip. Nail parts to the wall, then hit or throw it: nailed limbs tear off.',
+    desc: 'Nails dummy parts to the wall. Pull a nailed limb hard enough and it tears off.',
+    unlockRarity: 'common',
+    perks: [
+      { name: 'Framing Nails', desc: 'Nails hold twice as long and deal +50% damage.' },
+      { name: 'Nail Storm', desc: 'Fires three nails in a spread.' },
+    ],
+    held: {
+      body: { length: 40, com: 0.45, stiffness: 240, damping: 24, gravityComp: 1, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0 : Math.PI),
+      muzzle: { x: 40, y: -9 },
+      recoil: 8,
+    },
+    press(sc) {
+      sc.nailHeld = 0;
+      if (sc.ready('nailgun', 0.16)) fireNails(sc);
+    },
+    hold(sc, x0, y0, x1, y1, dt) {
+      sc.nailHeld = (sc.nailHeld ?? 0) + dt;
+      if (sc.nailHeld >= 0.3 && sc.ready('nailgun', 0.22)) fireNails(sc);
+    },
+  },
+
+  taser: {
+    name: 'Taser',
+    phrase: 'the taser',
+    hint: 'Held by the grip. Touch the prongs to a dummy and press to shock it. The charge jumps.',
+    desc: 'Shocks what the prongs touch. Reacts with fire, ice and nails.',
+    unlockRarity: 'common',
+    perks: [
+      { name: 'Chain Lightning', desc: 'Shocks jump to two more dummies.' },
+      { name: 'High Voltage', desc: 'Shocked dummies take +25% damage from everything.' },
+    ],
+    held: {
+      body: { length: 42, com: 0.45, stiffness: 200, damping: 20, gravityComp: 1, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0.15 : Math.PI - 0.15),
+      muzzle: { x: 42, y: -3 },
+    },
+    press(sc) {
+      zap(sc);
+    },
+    hold(sc) {
+      if (sc.ready('taserHold', 0.28)) zap(sc);
+    },
+  },
+
+  freeze: {
+    name: 'Freeze Ray',
+    phrase: 'the freeze ray',
+    hint: 'Held by the grip. Hold to freeze what the beam touches. Frozen parts shatter under blunt hits.',
+    desc: 'Freezes parts solid. Frozen parts shatter under blunt hits and burst into steam when burned.',
+    unlockRarity: 'rare',
+    perks: [
+      { name: 'Deep Freeze', desc: 'Freezes twice as fast and stays frozen longer.' },
+      { name: 'Brittle', desc: 'Shatter damage is doubled.' },
+    ],
+    held: {
+      body: { length: 50, com: 0.45, stiffness: 200, damping: 20, gravityComp: 1, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0 : Math.PI),
+      muzzle: { x: 50, y: -9 },
+      range: 420,
+    },
+    hold(sc) {
+      freezeBeam(sc);
+    },
+  },
+
+  rocket: {
+    name: 'Rocket',
+    phrase: 'the rocket launcher',
+    hint: 'Held by the grip. Press to fire a rocket along the tube. It kicks hard.',
+    desc: 'Fires rockets that explode on contact.',
+    unlockRarity: 'rare',
+    perks: [
+      { name: 'Napalm Warhead', desc: 'Explosions leave dummies burning.' },
+      { name: 'Twin Tubes', desc: 'Fires two rockets per shot.' },
+    ],
+    held: {
+      body: { length: 66, com: 0.5, stiffness: 150, damping: 16, gravityComp: 1, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0 : Math.PI),
+      muzzle: { x: 66, y: -10 },
+      recoil: 22,
+    },
+    press(sc) {
+      if (!sc.ready('rocket', 1)) return;
+      fireRocket(sc);
+      if (sc.level('rocket') >= 3) sc.later(0.16, () => fireRocket(sc));
+    },
+  },
+
+  vortex: {
+    name: 'Vortex',
+    phrase: 'vortex grenades',
+    hint: 'Tap to drop a vortex. It drags everything in, then implodes. Blow something up inside it.',
+    desc: 'Drags everything in and implodes. An explosion inside collapses it violently.',
+    unlockRarity: 'epic',
+    perks: [
+      { name: 'Event Horizon', desc: 'Pull radius +35%.' },
+      { name: 'Graviton Pulse', desc: 'Vortex damage doubled.' },
+    ],
+    press(sc, x, y) {
+      if (sc.projectiles.filter((p) => p.kind === 'vortex').length >= 2) return;
+      if (!sc.ready('vortex', 1.2)) return;
+      sc.spawnVortex(x, y, { R: sc.level('vortex') >= 2 ? 335 : 250, power: sc.level('vortex') >= 3 ? 2 : 1 });
+    },
+    cursor(ctx, sc, x, y) {
+      drawWeaponIcon(ctx, 'vortex', x, y, 26, { alpha: 0.55 });
     },
   },
 

@@ -152,6 +152,135 @@ export function drawWeaponIcon(ctx, id, x, y, size, { angle = 0, closed = false,
       break;
     }
 
+    case 'chainsaw':
+      ctx.rotate(-0.4);
+      roundRectPath(ctx, -2, -9, 50, 18, 9);
+      fillStroke(C.steel);
+      ctx.fillStyle = C.ink;
+      for (let x = 4; x < 46; x += 7) {
+        ctx.beginPath();
+        ctx.moveTo(x, -9);
+        ctx.lineTo(x + 3, -14);
+        ctx.lineTo(x + 6, -9);
+        ctx.fill();
+      }
+      roundRectPath(ctx, -44, -18, 44, 34, 8);
+      fillStroke('#e8862a');
+      ctx.beginPath();
+      ctx.arc(-26, -18, 12, Math.PI, 0);
+      ctx.stroke();
+      break;
+
+    case 'nailgun':
+      roundRectPath(ctx, -40, -26, 74, 24, 6);
+      fillStroke('#e7b931');
+      roundRectPath(ctx, 30, -20, 12, 12, 3);
+      fillStroke(C.iron);
+      ctx.beginPath();
+      ctx.moveTo(-30, -2);
+      ctx.lineTo(-8, -2);
+      ctx.lineTo(-4, 34);
+      ctx.lineTo(-26, 34);
+      ctx.closePath();
+      fillStroke(C.ink);
+      roundRectPath(ctx, 0, -2, 30, 10, 3);
+      fillStroke(C.paperDim);
+      break;
+
+    case 'taser':
+      roundRectPath(ctx, -38, -16, 62, 26, 8);
+      fillStroke('#e7d431');
+      ctx.fillStyle = C.ink;
+      ctx.fillRect(-30, -10, 10, 14);
+      ctx.beginPath();
+      ctx.moveTo(-28, 10);
+      ctx.lineTo(-10, 10);
+      ctx.lineTo(-8, 36);
+      ctx.lineTo(-26, 36);
+      ctx.closePath();
+      fillStroke(C.ink);
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(24, -9);
+      ctx.lineTo(42, -9);
+      ctx.moveTo(24, 3);
+      ctx.lineTo(42, 3);
+      ctx.stroke();
+      ctx.strokeStyle = C.volt;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(44, -10);
+      ctx.lineTo(38, -3);
+      ctx.lineTo(46, -1);
+      ctx.lineTo(40, 6);
+      ctx.stroke();
+      break;
+
+    case 'freeze':
+      roundRectPath(ctx, -40, -24, 64, 26, 10);
+      fillStroke('#e9f3f7');
+      ctx.strokeStyle = C.ice;
+      ctx.lineWidth = 5;
+      for (const x of [-24, -12, 0]) {
+        ctx.beginPath();
+        ctx.moveTo(x, -24);
+        ctx.lineTo(x, 2);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(24, -20);
+      ctx.lineTo(44, -28);
+      ctx.lineTo(44, 6);
+      ctx.lineTo(24, -2);
+      ctx.closePath();
+      fillStroke(C.ice);
+      ctx.beginPath();
+      ctx.moveTo(-30, 2);
+      ctx.lineTo(-10, 2);
+      ctx.lineTo(-6, 34);
+      ctx.lineTo(-26, 34);
+      ctx.closePath();
+      fillStroke(C.iron);
+      break;
+
+    case 'rocket':
+      ctx.rotate(-0.3);
+      roundRectPath(ctx, -46, -14, 84, 24, 6);
+      fillStroke('#6f7d55');
+      ctx.beginPath();
+      ctx.moveTo(38, -10);
+      ctx.lineTo(50, -2);
+      ctx.lineTo(38, 6);
+      ctx.closePath();
+      fillStroke(C.bad);
+      ctx.beginPath();
+      ctx.moveTo(-10, 10);
+      ctx.lineTo(4, 10);
+      ctx.lineTo(6, 32);
+      ctx.lineTo(-8, 32);
+      ctx.closePath();
+      fillStroke(C.ink);
+      break;
+
+    case 'vortex':
+      ctx.beginPath();
+      ctx.arc(0, 0, 30, 0, Math.PI * 2);
+      fillStroke('#3b2257');
+      ctx.strokeStyle = C.vortex;
+      ctx.lineWidth = 6;
+      for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(0, 0, 8 + i * 7, i * 2.1, i * 2.1 + 3.4);
+        ctx.stroke();
+      }
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(0, 0, 4, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+
     case 'anvil':
       ctx.beginPath();
       ctx.moveTo(-50, -22);
@@ -180,7 +309,7 @@ export function drawWeaponIcon(ctx, id, x, y, size, { angle = 0, closed = false,
 // Held weapons are drawn in a local frame whose origin is the grip: +x runs
 // along the weapon, and guns flip vertically when pointing left so they stay
 // upright. Units are world units.
-export const HELD_FLIPS = { pistol: true, flame: true };
+export const HELD_FLIPS = { pistol: true, flame: true, chainsaw: true, nailgun: true, taser: true, freeze: true, rocket: true };
 
 export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
   ctx.save();
@@ -271,6 +400,107 @@ export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
       ctx.beginPath();
       ctx.arc(59, -4, 2.5 + Math.random() * 1.2, 0, Math.PI * 2);
       ctx.fill();
+      break;
+    case 'chainsaw':
+      roundRectPath(ctx, 18, -5, 56, 10, 5);
+      fillStroke(C.steel);
+      ctx.fillStyle = C.ink;
+      for (let x = 22; x < 72; x += 6) {
+        ctx.beginPath();
+        ctx.moveTo(x, -5);
+        ctx.lineTo(x + 2.5, -8.5);
+        ctx.lineTo(x + 5, -5);
+        ctx.moveTo(x, 5);
+        ctx.lineTo(x + 2.5, 8.5);
+        ctx.lineTo(x + 5, 5);
+        ctx.fill();
+      }
+      roundRectPath(ctx, -8, -14, 28, 24, 6);
+      fillStroke('#e8862a');
+      ctx.beginPath();
+      ctx.moveTo(-4, -14);
+      ctx.quadraticCurveTo(6, -26, 16, -14);
+      ctx.stroke();
+      break;
+
+    case 'nailgun':
+      roundRectPath(ctx, -10, -17, 46, 14, 4);
+      fillStroke('#e7b931');
+      roundRectPath(ctx, 34, -12, 6, 6, 1.5);
+      fillStroke(C.iron);
+      roundRectPath(ctx, 10, -4, 22, 6, 2);
+      fillStroke(C.paperDim);
+      ctx.beginPath();
+      ctx.moveTo(-5, -4);
+      ctx.lineTo(5, -4);
+      ctx.lineTo(8, 14);
+      ctx.lineTo(-3, 14);
+      ctx.closePath();
+      fillStroke(C.ink);
+      break;
+
+    case 'taser':
+      roundRectPath(ctx, -6, -10, 40, 12, 4);
+      fillStroke('#e7d431');
+      ctx.beginPath();
+      ctx.moveTo(-4, 0);
+      ctx.lineTo(5, 0);
+      ctx.lineTo(7, 14);
+      ctx.lineTo(-2, 14);
+      ctx.closePath();
+      fillStroke(C.ink);
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(34, -7);
+      ctx.lineTo(42, -7);
+      ctx.moveTo(34, 1);
+      ctx.lineTo(42, 1);
+      ctx.stroke();
+      if (flash > 0) {
+        ctx.strokeStyle = C.volt;
+        ctx.beginPath();
+        ctx.moveTo(43, -8);
+        ctx.lineTo(40, -3);
+        ctx.lineTo(44, -2);
+        ctx.lineTo(41, 2);
+        ctx.stroke();
+      }
+      break;
+
+    case 'freeze':
+      roundRectPath(ctx, -8, -16, 42, 14, 6);
+      fillStroke('#e9f3f7');
+      ctx.fillStyle = C.ice;
+      for (const x of [2, 10, 18]) ctx.fillRect(x, -16, 3, 14);
+      ctx.beginPath();
+      ctx.moveTo(34, -14);
+      ctx.lineTo(50, -18);
+      ctx.lineTo(50, 0);
+      ctx.lineTo(34, -4);
+      ctx.closePath();
+      fillStroke(C.ice);
+      ctx.beginPath();
+      ctx.moveTo(-5, -3);
+      ctx.lineTo(5, -3);
+      ctx.lineTo(8, 14);
+      ctx.lineTo(-3, 14);
+      ctx.closePath();
+      fillStroke(C.iron);
+      break;
+
+    case 'rocket':
+      roundRectPath(ctx, -24, -18, 90, 16, 4);
+      fillStroke('#6f7d55');
+      ctx.fillStyle = C.ink;
+      ctx.fillRect(60, -18, 6, 16);
+      ctx.fillRect(-24, -18, 5, 16);
+      ctx.beginPath();
+      ctx.moveTo(-4, -3);
+      ctx.lineTo(6, -3);
+      ctx.lineTo(8, 14);
+      ctx.lineTo(-2, 14);
+      ctx.closePath();
+      fillStroke(C.ink);
       break;
   }
 

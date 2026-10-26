@@ -1,12 +1,20 @@
 // Everything that persists across rounds of a single run.
 
-import { WEAPON_ORDER } from './weapons.js';
+import { WEAPON_ORDER, MAX_SLOTS } from './weapons.js';
+import { ACTS, FLOORS_PER_ACT } from './variants.js';
 
 export class Run {
   constructor(seed) {
     this.seed = seed;
-    this.round = 1;
-    this.weapons = { hands: { level: 1 }, bat: { level: 1 } };
+    // Where we are: act 1-3, floor 1-5 (5 is the boss), and how many times
+    // the acts have looped in endless mode.
+    this.act = 1;
+    this.floor = 1;
+    this.loop = 0;
+    this.endless = false;
+    this.won = false;
+    this.workshopUsed = -1; // act index (with loops) where the workshop was used
+    this.weapons = { hands: { level: 1 } };
 
     // Player modifiers
     this.dmgMult = 1;
@@ -18,6 +26,9 @@ export class Run {
     this.choices = 3;
     this.rerolls = 0;
     this.lives = 0;
+    this.statusMult = 1;
+    this.reactionMult = 1;
+    this.chainReaction = false;
 
     // Dummy modifiers
     this.dummyHpMult = 1;
@@ -32,11 +43,32 @@ export class Run {
     this.taken = [];
     this.weaponDamage = {};
     this.lastPrimary = null;
-    this.totals = { damage: 0, kills: 0, severs: 0, cleared: 0, bonuses: 0 };
+    this.totals = { damage: 0, kills: 0, severs: 0, cleared: 0, bonuses: 0, reactions: 0 };
+  }
+
+  get actDef() {
+    return ACTS[(this.act - 1) % ACTS.length];
+  }
+
+  get actIndex() {
+    return this.loop * ACTS.length + this.act;
+  }
+
+  // Overall floor number, used to scale difficulty.
+  get depth() {
+    return (this.actIndex - 1) * FLOORS_PER_ACT + this.floor;
+  }
+
+  get isBossFloor() {
+    return this.floor === FLOORS_PER_ACT;
   }
 
   get owned() {
     return WEAPON_ORDER.filter((id) => this.weapons[id]);
+  }
+
+  get slotsFull() {
+    return this.owned.length >= MAX_SLOTS;
   }
 
   level(id) {
@@ -51,5 +83,18 @@ export class Run {
       if ((this.weaponDamage[id] ?? 0) > (this.weaponDamage[best] ?? 0)) best = id;
     }
     return best ?? owned[owned.length - 1];
+  }
+
+  // Move to the next floor; returns true when that starts a new act.
+  advance() {
+    this.floor++;
+    if (this.floor <= FLOORS_PER_ACT) return false;
+    this.floor = 1;
+    this.act++;
+    if (this.act > ACTS.length) {
+      this.act = 1;
+      this.loop++;
+    }
+    return true;
   }
 }

@@ -6,6 +6,7 @@ import { clamp } from '../engine/math.js';
 import { drawWeaponIcon } from './icons.js';
 import { WEAPONS } from './weapons.js';
 import { describeProgress, primaryProgress } from './objectives.js';
+import { VARIANTS, TWISTS } from './variants.js';
 import { C, F, font } from './theme.js';
 
 function setSpacing(ctx, px) {
@@ -129,6 +130,7 @@ export class Hud {
       const ok = sc.timeLeft >= sec.seconds;
       return ok ? [`${Math.ceil(sc.timeLeft - sec.seconds)}s margin`, C.paperDim] : ['TOO SLOW', C.bad];
     }
+    if (sec.id === 'reaction') return sec.got ? ['GOT ONE', C.good] : ['NEEDED', C.paperDim];
     return ['ON TRACK', C.paperDim];
   }
 
@@ -219,16 +221,53 @@ export class Hud {
     this.stitch(ctx, pad, 66, W - pad, 66);
 
     const round = sc.round;
-    if (!round || sc.state === 'title') {
+    if (!sc.run || sc.state === 'title') {
       this.buttons = [];
       return;
     }
+    let y;
+    if (!round || sc.state === 'between') {
+      y = this.renderRunHeader(ctx, pad, inner);
+    } else {
+      y = this.renderOrder(ctx, pad, inner);
+    }
+    this.renderArsenal(ctx, y, pad, inner);
+  }
 
-    // Round and clock.
+  // Between floors: where the run is, instead of a stale work order.
+  renderRunHeader(ctx, pad, inner) {
+    const run = this.sc.run;
+    let y = 106;
+    ctx.textAlign = 'left';
+    ctx.font = font(24, F.display, 400);
+    ctx.fillStyle = C.paper;
+    ctx.fillText(`ACT ${run.act} · FLOOR ${run.floor}`, pad, y, inner);
+    y += 26;
+    ctx.font = font(16, F.body, 600);
+    ctx.fillStyle = C.muted;
+    ctx.fillText(`${run.actDef.name}${run.loop ? ` · endless ${run.loop}` : ''}`, pad, y, inner);
+    y += 18;
+    for (let i = 0; i < 5; i++) {
+      ctx.fillStyle = i < run.floor - 1 ? C.good : i === run.floor - 1 ? C.gold : C.inkSoft;
+      roundRectPath(ctx, pad + i * ((inner + 6) / 5), y, (inner + 6) / 5 - 6, 6, 3);
+      ctx.fill();
+    }
+    y += 24;
+    this.stitch(ctx, pad, y, pad + inner, y);
+    return y;
+  }
+
+  renderOrder(ctx, pad, inner) {
+    const sc = this.sc;
+    const L = this.L;
+    const W = L.sideW;
+    const round = sc.round;
+
+    // Floor and clock.
     let y = 106;
     ctx.font = font(24, F.display, 400);
     ctx.fillStyle = C.paper;
-    const roundText = `ROUND ${round.number}`;
+    const roundText = `FLOOR ${round.act}-${round.floor}`;
     ctx.fillText(roundText, pad, y);
     let cx = pad + ctx.measureText(roundText).width + 10;
     if (round.boss) cx = this.chip(ctx, 'BOSS', cx, y - 17, C.bad, C.ink) + 6;
@@ -239,6 +278,12 @@ export class Hud {
     ctx.fillText(`${Math.ceil(Math.max(0, sc.timeLeft))}s`, W - pad, y + 2);
     y += 16;
     this.bar(ctx, pad, y, inner, 6, sc.timeLeft / round.time, sc.timeLeft < 10 ? C.bad : C.gold);
+    y += 26;
+    ctx.textAlign = 'left';
+    ctx.font = font(15, F.body, 600);
+    ctx.fillStyle = C.muted;
+    const twist = round.twist ? ` · ${TWISTS[round.twist].name}` : '';
+    ctx.fillText(`${sc.run.actDef.name} · ${VARIANTS[round.variant].name}${twist}`, pad, y, inner);
 
     // Work order.
     const stats = sc.stats;
@@ -295,11 +340,18 @@ export class Hud {
     ctx.fillText('Reward: one extra card pick', pad, y);
     y += 18;
     this.stitch(ctx, pad, y, W - pad, y);
+    return y;
+  }
+
+  renderArsenal(ctx, y, pad, inner) {
+    const sc = this.sc;
+    const L = this.L;
+    const W = L.sideW;
 
     // Arsenal.
     y += 30;
     label(ctx, 'ARSENAL', pad, y, C.muted);
-    if (sc.input.finePointer) label(ctx, '1-7 · WHEEL', W - pad, y, C.inkLine, 'right');
+    if (sc.input.finePointer) label(ctx, `1-${this.owned().length} · WHEEL`, W - pad, y, C.inkLine, 'right');
     y += 12;
     const owned = this.owned();
     const footer = 70;
@@ -411,7 +463,7 @@ export class Hud {
       ctx.textAlign = 'left';
       ctx.font = font(15, F.display, 400);
       ctx.fillStyle = C.paper;
-      const rt = `R${round.number}`;
+      const rt = `${round.act}-${round.floor}`;
       ctx.fillText(rt, pad, 22);
       let x = pad + ctx.measureText(rt).width + 10;
       ctx.font = font(16, F.body, 700);
@@ -442,7 +494,7 @@ export class Hud {
     ctx.textAlign = 'left';
     ctx.fillStyle = C.paper;
     ctx.font = font(19, F.display, 400);
-    const roundText = `ROUND ${round.number}`;
+    const roundText = `FLOOR ${round.act}-${round.floor}`;
     ctx.fillText(roundText, pad, 28);
     let x = pad + ctx.measureText(roundText).width + 10;
     if (round.boss) x = this.chip(ctx, 'BOSS', x, 13, C.bad, C.ink) + 6;
