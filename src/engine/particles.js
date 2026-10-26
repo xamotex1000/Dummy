@@ -81,6 +81,17 @@ export class Particles {
           ctx.stroke();
           break;
         }
+        case 'beam': {
+          ctx.globalAlpha = t;
+          ctx.strokeStyle = p.color;
+          ctx.lineWidth = p.size * t;
+          ctx.lineCap = 'round';
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x2, p.y2);
+          ctx.stroke();
+          break;
+        }
         case 'smoke': {
           ctx.globalAlpha = t * 0.5;
           ctx.fillStyle = p.color;

@@ -176,3 +176,117 @@ export function drawWeaponIcon(ctx, id, x, y, size, { angle = 0, closed = false,
   }
   ctx.restore();
 }
+
+// Held weapons are drawn in a local frame whose origin is the grip: +x runs
+// along the weapon, and guns flip vertically when pointing left so they stay
+// upright. Units are world units.
+export const HELD_FLIPS = { pistol: true, flame: true };
+
+export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
+  ctx.save();
+  ctx.translate(held.x, held.y);
+  ctx.rotate(held.angle);
+  if (HELD_FLIPS[id] && Math.cos(held.angle) < 0) ctx.scale(1, -1);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = C.ink;
+  const fillStroke = (fill) => {
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.stroke();
+  };
+
+  switch (id) {
+    case 'bat':
+      ctx.beginPath();
+      ctx.moveTo(-2, -3.5);
+      ctx.lineTo(28, -4.5);
+      ctx.lineTo(84, -10);
+      ctx.arc(84, 0, 10, -Math.PI / 2, Math.PI / 2);
+      ctx.lineTo(28, 4.5);
+      ctx.lineTo(-2, 3.5);
+      ctx.closePath();
+      fillStroke(C.wood);
+      ctx.beginPath();
+      ctx.arc(-5, 0, 5.5, 0, Math.PI * 2);
+      fillStroke(C.wood);
+      ctx.strokeStyle = 'rgba(60,30,10,0.4)';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(34, -2);
+      ctx.lineTo(82, -5);
+      ctx.moveTo(40, 3);
+      ctx.lineTo(78, 5);
+      ctx.stroke();
+      break;
+
+    case 'knife':
+      ctx.beginPath();
+      ctx.moveTo(14, -4);
+      ctx.lineTo(42, -4);
+      ctx.quadraticCurveTo(48, -3.5, 49, -2);
+      ctx.quadraticCurveTo(34, 6, 14, 4.5);
+      ctx.closePath();
+      fillStroke(C.steel);
+      roundRectPath(ctx, 10, -7, 4, 14, 1.5);
+      fillStroke(C.iron);
+      roundRectPath(ctx, -12, -4.5, 22, 9, 3);
+      fillStroke('#3a2a20');
+      break;
+
+    case 'pistol':
+      ctx.beginPath();
+      ctx.moveTo(-5, -5);
+      ctx.lineTo(5, -5);
+      ctx.lineTo(9, 14);
+      ctx.lineTo(-3, 14);
+      ctx.closePath();
+      fillStroke('#3d3229');
+      ctx.beginPath();
+      ctx.arc(10, -2, 5, 0, Math.PI);
+      ctx.stroke();
+      roundRectPath(ctx, -8, -15, 42, 10, 2);
+      fillStroke(C.iron);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(-4, -13, 34, 2);
+      break;
+
+    case 'flame':
+      roundRectPath(ctx, -14, 3, 24, 12, 6);
+      fillStroke(C.bad);
+      ctx.beginPath();
+      ctx.moveTo(-3, -2);
+      ctx.lineTo(5, -2);
+      ctx.lineTo(7, 12);
+      ctx.lineTo(-1, 12);
+      ctx.closePath();
+      fillStroke('#3d3229');
+      roundRectPath(ctx, -10, -10, 38, 11, 4);
+      fillStroke(C.iron);
+      roundRectPath(ctx, 26, -7, 31, 6, 2);
+      fillStroke(C.steel);
+      // Pilot light.
+      ctx.fillStyle = flash > 0 ? C.gold : C.fire;
+      ctx.beginPath();
+      ctx.arc(59, -4, 2.5 + Math.random() * 1.2, 0, Math.PI * 2);
+      ctx.fill();
+      break;
+  }
+
+  // The gloved fist wrapped around the grip.
+  ctx.lineWidth = 2.5;
+  ctx.strokeStyle = C.ink;
+  roundRectPath(ctx, -7, -8, 14, 16, 6);
+  ctx.fillStyle = C.paper;
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (const fx of [-2.5, 2.5]) {
+    ctx.moveTo(fx, -8);
+    ctx.lineTo(fx, -3);
+  }
+  ctx.stroke();
+  ctx.restore();
+}

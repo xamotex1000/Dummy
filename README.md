@@ -23,8 +23,9 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 
 | Desktop | Phone | Action |
 | --- | --- | --- |
-| Click | Tap | Punch, shoot, drop a grenade or anvil |
-| Drag | Drag | Grab and throw, or swing the bat and knife |
+| Click | Tap | Punch, fire guns, drop a grenade or anvil |
+| Move | Drag | Swing held weapons (bat, knife) from the grip |
+| Drag | Drag | Grab and throw with Hands |
 | 1–7, Q/E, mouse wheel | Weapon rack | Switch weapon |
 | Esc or P | Pause button | Pause (also happens automatically when the window loses focus) |
 | Space / Enter | Tap | Confirm dialogs |
@@ -59,13 +60,25 @@ Targets and dummy health both scale each round, so the cards you take are what c
 
 | Weapon | Input | Notes |
 | --- | --- | --- |
-| Hands | Tap to punch, drag to grab and throw | Throws are the main source of impact damage |
-| Bat | Swipe | Damage scales with swipe speed |
-| Knife | Swipe | Applies bleed and tears limbs off quickly |
-| Pistol | Tap, or hold for auto-fire | Precise, so it suits "only hit the head" |
-| Grenade | Tap to drop | Area damage plus a big shove |
-| Flamer | Hold | Sets parts burning (damage over time) |
-| Anvil | Tap to drop from the ceiling | Heavy single hits |
+| Hands | Click/tap to punch, drag to grab and throw | Throws are the main source of impact damage |
+| Bat | Held: move it through the dummy | Hangs from the handle and whips. Damage scales with how fast the barrel connects |
+| Knife | Held: move it through the dummy | Held by the hilt. Cuts bleed and tear limbs off quickly |
+| Pistol | Held: press to fire, hold for auto-fire | Shoots along the barrel. Recoil kicks it up |
+| Grenade | Click/tap to drop | Area damage plus a big shove |
+| Flamer | Held: hold to spray | Fire jets out of the nozzle and sets parts burning |
+| Anvil | Click/tap to drop from the ceiling | Heavy single hits |
+
+### Held weapons
+
+The bat, knife, pistol and flamer are physical objects gripped at the handle. Your pointer is the hand. Each weapon is a rigid rod hinged at the hand (`engine/pivot.js`):
+
+- **What moves it:** gravity, and the pseudo-force from your hand's acceleration. A fast flick makes the far end lag and then whip through.
+- **Wrist spring:** pulls the weapon toward a resting pose that faces the nearest dummy. Guns are held level, so the wrist cancels their weight; the bat hangs and swings.
+- **Floor:** the weapon rests on the floor and bounces off it. When the floor is in the way, it swings back to rest over the top.
+- **Melee hits:** the striking part is swept from last tick's pose to this one, so fast swings can't skip past the dummy between frames. Damage uses the speed of the exact point on the weapon that hit, relative to the body part it hit. A slow contact only shoves.
+- **Guns:** shots are raycast from the muzzle along the barrel. Recoil adds spin and the wrist settles it.
+
+On desktop the weapon follows the mouse while it's over the arena. On a phone it appears under your finger while you touch the arena.
 
 ## Code layout
 
@@ -74,6 +87,7 @@ src/
   engine/            generic, game-agnostic
     core.js          fixed-timestep loop, scene stack, hit-stop / slow-mo
     physics.js       Verlet points + distance constraints, wall and point collisions
+    pivot.js         rigid rod hinged at a moving pivot (held weapons)
     renderer.js      DPR-aware canvas, trauma screen shake, path helpers
     input.js         unified mouse/touch pointer with smoothed swipe velocity
     audio.js         WebAudio synth (noise bursts + oscillators, no audio files)
@@ -82,14 +96,14 @@ src/
     math.js          segment distance, easing, color mixing
   game/
     dummy.js         15-point ragdoll, per-segment hit tests, limb severing, death
-    weapons.js       weapon definitions (press / hold / release handlers + perks)
+    weapons.js       weapon definitions (input handlers, held-weapon physics config, perks)
     objectives.js    primary objectives, bonus conditions, round generation
     cards.js         card pool, rarity weights, offers
     run.js           state that persists across a run
     hud.js           desktop sidebar, or a top strip + weapon rack on phones
     layout.js        desktop-first screen layout and the world-unit scale
     background.js    pre-rendered padded-cell backdrop
-    icons.js         vector weapon icons
+    icons.js         vector weapon icons and grip-origin held weapon sprites
     sfx.js, theme.js
     scenes/play.js   the arena: damage pipeline, physics callbacks, round lifecycle
     scenes/overlays.js  title, work order, results, card draft, pause, game over
