@@ -222,8 +222,9 @@ class Overlay {
 // ---------------------------------------------------------------- title
 
 const CONTROLS = [
-  ['CLICK', 'Punch, shoot, drop grenades and anvils'],
-  ['DRAG', 'Grab and throw, or swing the bat and knife'],
+  ['MOVE', 'Swing the bat and knife. They pivot from your grip'],
+  ['CLICK', 'Punch, fire guns, drop grenades and anvils'],
+  ['DRAG', 'Grab and throw the dummy with Hands'],
   ['1-7 / WHEEL', 'Switch weapon'],
   ['ESC', 'Pause'],
 ];

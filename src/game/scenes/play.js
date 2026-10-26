@@ -2,6 +2,7 @@
 // Overlays (title, work order, cards, game over) are pushed on top of it.
 
 import { World, Point } from '../../engine/physics.js';
+import { PivotBody } from '../../engine/pivot.js';
 import { Particles } from '../../engine/particles.js';
 import { RNG } from '../../engine/rng.js';
 import { clamp } from '../../engine/math.js';
@@ -13,7 +14,7 @@ import { Sfx } from '../sfx.js';
 import { Hud } from '../hud.js';
 import { buildBackground } from '../background.js';
 import { computeLayout } from '../layout.js';
-import { drawWeaponIcon } from '../icons.js';
+import { drawWeaponIcon, drawHeldWeapon } from '../icons.js';
 import { C, F, font } from '../theme.js';
 import { TitleOverlay, IntroOverlay, ClearOverlay, CardOverlay, GameOverOverlay, SecondWindOverlay, PauseOverlay } from './overlays.js';
 
@@ -64,7 +65,8 @@ export class PlayScene {
     this.weaponId = 'hands';
     this.grabbed = null;
     this.handTap = null;
-    this.flameAt = null;
+    this.held = null; // the gripped weapon's PivotBody, when the hand is in the arena
+    this.facing = 1; // which way held weapons point: toward the nearest dummy
     this.pointerOwner = null;
     this.combo = { count: 0, t: 0 };
     this.stamp = null;
@@ -219,6 +221,7 @@ export class PlayScene {
   }
 
   clearArena() {
+    this.held = null;
     for (const d of this.dummies) d.destroy();
     for (const p of this.projectiles) p.p.dead = true;
     this.dummies = [];
@@ -595,10 +598,51 @@ export class PlayScene {
     if (!this.run?.weapons[id] && this.run) return;
     if (this.weaponId === id) return;
     this.releaseGrab(false);
+    this.held = null;
     this.handTap = null;
     this.weaponId = id;
     this.sfx.select();
     if (this.state === 'playing') this.hud.showHint(WEAPONS[id].hint);
+  }
+
+  // Held weapons swing from the hand. The hand is "in the arena" while a
+  // mouse hovers it, or while a finger is down on it (a quick tap can start
+  // and end within one tick, so a fresh press counts too).
+  updateHeld(dt) {
+    const def = WEAPONS[this.weaponId];
+    const p = this.input.pointer;
+    const touching = p.down || p.pressed;
+    const present = def.held && this.inArena(p.x, p.y) && (p.type === 'mouse' ? p.inside : touching) && this.pointerOwner !== 'ui';
+    if (!present) {
+      if (this.held) this.held.active = false;
+      return;
+    }
+    if (!this.held) this.held = new PivotBody(def.held.body);
+    const held = this.held;
+    this.updateFacing(this.ptr.x);
+    held.rest = def.held.rest(this.facing);
+    if (!held.active) {
+      held.place(this.ptr.x, this.ptr.y, held.rest);
+      held.active = true;
+    }
+    held.update(this.ptr.x, this.ptr.y, dt, this.world.gravity);
+    held.restOnFloor(this.bounds.bottom, held.length, 6);
+    def.heldUpdate?.(this, held, dt);
+  }
+
+  // Point toward the nearest live dummy, with a little hysteresis so the
+  // weapon doesn't flip back and forth when the hand is right above it.
+  updateFacing(x) {
+    let best = null;
+    for (const d of this.dummies) {
+      if (!d.alive) continue;
+      const c = d.center();
+      if (!best || Math.abs(c.x - x) < Math.abs(best.x - x)) best = c;
+    }
+    if (!best) return;
+    const dx = best.x - x;
+    if (dx > 24) this.facing = 1;
+    else if (dx < -24) this.facing = -1;
   }
 
   cycleWeapon(dir) {
@@ -657,10 +701,11 @@ export class PlayScene {
 
   update(dt, isTop) {
     this.time += dt;
-    this.flameAt = null;
     this.syncPointer();
     if (this.state === 'playing') this.timeLeft -= dt;
     if (this.state === 'playing' && isTop) {
+      // Move the held weapon first so a press fires from where it is now.
+      this.updateHeld(dt);
       this.handleInput(dt);
     } else if (this.pointerOwner) {
       this.releaseGrab(false);
@@ -837,14 +882,34 @@ export class PlayScene {
     this.particles.spawn({ kind: 'dot', x, y, size: 10, grow: -60, color: '#fff3b0', life: 0.08 });
   }
 
-  fxFlame(x, y) {
+  // A jet of fire out of a muzzle, inheriting some of the hand's motion.
+  fxFlameJet(m, held) {
     for (let i = 0; i < 3; i++) {
+      const a = Math.atan2(m.uy, m.ux) + this.rng.range(-0.18, 0.18);
+      const sp = this.rng.range(380, 560);
       this.particles.spawn({
-        kind: 'fire', x: x + this.rng.range(-6, 6), y: y + this.rng.range(-6, 6),
-        vx: this.rng.range(-90, 90), vy: this.rng.range(-260, -120), drag: 1.5, size: this.rng.range(8, 15),
-        color: C.fire, color2: C.fire2, life: this.rng.range(0.25, 0.45),
+        kind: 'fire', x: m.x, y: m.y,
+        vx: Math.cos(a) * sp + held.vx * 0.3, vy: Math.sin(a) * sp + held.vy * 0.3 - 30,
+        drag: 2.2, size: this.rng.range(7, 13), grow: 26,
+        color: C.fire, color2: C.fire2, life: this.rng.range(0.3, 0.45),
       });
     }
+  }
+
+  fxTracer(x0, y0, x1, y1) {
+    this.particles.spawn({ kind: 'beam', x: x0, y: y0, x2: x1, y2: y1, size: 3, color: '#fff3b0', life: 0.09 });
+  }
+
+  // Where a ray from (x, y) leaves the arena.
+  rayExit(x, y, ux, uy) {
+    const B = this.bounds;
+    let t = Infinity;
+    if (ux > 0) t = Math.min(t, (B.right - x) / ux);
+    if (ux < 0) t = Math.min(t, (B.left - x) / ux);
+    if (uy > 0) t = Math.min(t, (B.bottom - y) / uy);
+    if (uy < 0) t = Math.min(t, (B.top - y) / uy);
+    t = Math.max(0, Number.isFinite(t) ? t : 0);
+    return { x: x + ux * t, y: y + uy * t };
   }
 
   fxExplosion(x, y, R) {
@@ -948,6 +1013,10 @@ export class PlayScene {
 
   renderCursor(ctx) {
     if (this.state !== 'playing') return;
+    if (this.held?.active) {
+      drawHeldWeapon(ctx, this.weaponId, this.held, { flash: this.input.pointer.down ? 1 : 0 });
+      return;
+    }
     const p = this.input.pointer;
     if (!p.inside || !this.inArena(p.x, p.y) || this.hud.isUi(p.x, p.y)) return;
     if (p.type !== 'mouse' && !p.down) return;
