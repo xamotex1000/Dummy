@@ -7,6 +7,7 @@ import { capsulePath } from '../engine/renderer.js';
 import { closestOnSegment, segmentDistance, clamp, hexToRgb } from '../engine/math.js';
 import { C, RGB } from './theme.js';
 import { VARIANTS } from './variants.js';
+import { settings } from './settings.js';
 
 let nextId = 1;
 
@@ -335,7 +336,7 @@ export class Dummy {
   // Base burlap, then bruising, scorching, ice, electricity and hit flash.
   segColor(seg) {
     const mix = (c, to, t) => c.map((v, i) => v + (to[i] - v) * t);
-    let c = mix(this.baseRgb, RGB.bruise, clamp(seg.dmg / (this.maxHp * 0.45), 0, 1) * 0.8);
+    let c = mix(this.baseRgb, settings.gore ? RGB.bruise : RGB.grime, clamp(seg.dmg / (this.maxHp * 0.45), 0, 1) * 0.8);
     if (seg.char > 0) c = mix(c, RGB.char, clamp(seg.char, 0, 0.7));
     if (seg.frozen > 0) c = mix(c, RGB.ice, 0.65);
     if (this.shockT > 0 && Math.random() < 0.5) c = mix(c, RGB.volt, 0.6);

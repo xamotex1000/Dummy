@@ -19,7 +19,7 @@ It's designed desktop-first and adapts down to phones:
 - **Phone, portrait:** a top strip with the test order, and a weapon rack along the bottom.
 - **Phone, landscape:** a two-row strip, and the arena zooms in so the dummy stays readable.
 
-Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) and a chart-recorder trace of your damage over the round. Results, run-end sheets and card picks come out of a test recorder at the bottom of the screen. They feed up a line at a time and tear off with a ragged edge; press any key or tap to hurry the printer.
+Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) a cardiac monitor and a chart-recorder trace of your damage over the round. Results, run-end sheets and card picks come out of a test recorder at the bottom of the screen. They feed up a line at a time and tear off with a ragged edge; press any key or tap to hurry the printer.
 
 The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
 
@@ -32,6 +32,31 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 | Esc or P | Pause button | Pause (also happens automatically when the window loses focus) |
 | Space / Enter | Tap | Confirm dialogs |
 | 1–6, R | Tap | Pick a card or ticket, reroll |
+
+## Settings
+
+The gear on the pause sheet (or the title screen, or the S key) opens the facility settings. Both settings are saved in the browser.
+
+- **Gore** (on by default). Hits splash blood that pools on the floor, splats on the back wall and runs down the walls. Torn limbs pump from both ends, and destroyed dummies burst. Stains last for the round. Off swaps all of it for stuffing, and bruises turn to grime.
+- **Rogue-lite mode** (off by default). Off, it's a straight roguelike: every run starts from scratch. On, every run that ends pays out credits: 10 per floor cleared, 5 per secondary met, 2 per reaction, and 100 for finishing the series. Spend them in **Facility Upgrades** (from settings, the title screen or the run-over sheet) on permanent upgrades that apply when a new run starts:
+
+| Upgrade | Effect | Cost |
+|---|---|---|
+| Research Funding | +1 starting reroll per level | 40 / 80 / 140 |
+| Overtime Clause | +3 s on every floor per level | 50 / 100 / 160 |
+| Calibrated Tools | starting weapon begins at level 2 | 90 |
+| Pre-Wired Cell | first trap begins at level 2 | 90 |
+| Longer Shortlist | one more card on every pick | 180 |
+| Insurance Policy | start with a Second Wind | 160 |
+| Salvage Rights | +25% credits per level | 70 / 150 |
+
+## The cardiac monitor
+
+The dummy has a heart, and the results sheet prints its ECG. Damage, torn limbs, being grabbed and burning push the rate up from about 66 BPM toward 220, and freezing slows it down. Electrocution (taser, tesla coil, Overload and the rest) throws it into ventricular fibrillation for as long as the shock lasts. A destroyed dummy flatlines until the next one comes in.
+
+The monitor shows a six-second lead II rhythm strip of the most telling moment: the first shock if there was one, else the fastest stretch. Under it is the rate over the whole round, with shocks and flatlines shaded, and rest, average and peak rate, V-fib and arrest counts.
+
+Sheets fit themselves to the screen: each one measures its layouts and uses the fullest that fits. Desktop puts injury and cardiac side by side. Short screens drop the damage trace first, then the injury diagram.
 
 ## How a run works
 
@@ -188,6 +213,10 @@ src/
     objectives.js    objectives, bonus conditions, round and route generation
     cards.js         card pool, rarity weights, offers
     run.js           state that persists across a run
+    settings.js      saved settings (gore, rogue-lite)
+    meta.js          rogue-lite credits and facility upgrades
+    gore.js          blood droplets, stains and stump spurts
+    heart.js         the subject's heart: rate, fibrillation, flatlines
     hud.js           desktop sidebar, or a top strip + weapon rack on phones
     layout.js        desktop-first screen layout and the world-unit scale
     background.js    pre-rendered backdrop per act

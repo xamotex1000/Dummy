@@ -17,6 +17,10 @@ import { Run } from '../run.js';
 import { VARIANTS, ACTS } from '../variants.js';
 import { StatusSystem } from '../statuses.js';
 import { Entrance } from '../entrances.js';
+import { Gore } from '../gore.js';
+import { Heart, newHeartRecord } from '../heart.js';
+import { settings } from '../settings.js';
+import { applyUpgrades, payRun } from '../meta.js';
 import { TRAPS, createTrap, mountById } from '../traps.js';
 import {
   spawnGrenade, spawnAnvil, spawnVortex, updateProjectiles, drawProjectile,
@@ -54,7 +58,7 @@ function save(key, v) {
 }
 
 // Per-region damage and a damage trace feed the results sheet.
-const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0, trapDamage: 0, elapsed: 0, regions: {}, trace: [], traceAcc: 0, traceLast: 0 });
+const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0, trapDamage: 0, elapsed: 0, regions: {}, trace: [], traceAcc: 0, traceLast: 0, heart: newHeartRecord() });
 const TRACE_STEP = 0.25;
 
 // Distinct damage sources within this window stack the chain multiplier.
@@ -70,6 +74,8 @@ export class PlayScene {
     this.world.onImpact = (p, speed) => this.onImpact(p, speed);
     this.world.onContact = (a, b, speed) => this.onContact(a, b, speed);
     this.particles = new Particles(1400);
+    this.gore = new Gore(this);
+    this.heart = new Heart();
     this.sfx = new Sfx(engine.audio);
     this.hud = new Hud(this);
     this.status = new StatusSystem(this);
@@ -186,6 +192,8 @@ export class PlayScene {
     const seed = (Date.now() ^ (Math.random() * 1e9)) >>> 0;
     this.run = new Run(seed);
     this.rng = new RNG(seed);
+    const run = this.run;
+    if (settings.rogueLite) applyUpgrades(run);
     this.round = null;
     this.state = 'between';
     this.weaponId = 'hands';
@@ -195,13 +203,22 @@ export class PlayScene {
       title: 'CHOOSE YOUR TOOL',
       subtitle: 'Pick the weapon you start with. Your hands are always free.',
       rerolls: false,
-      onDone: () => this.engine.push(new CardOverlay(this, {
-        offer: starterTrapOffer(this.rng),
-        title: 'INSTALL YOUR FIRST TRAP',
-        subtitle: 'Traps run on their own. You will place it on the next screen.',
-        rerolls: false,
-        onDone: () => this.showAct(),
-      })),
+      onDone: () => {
+        if (run.toolkit) for (const id of run.owned) if (id !== 'hands') run.weapons[id].level = 2;
+        this.engine.push(new CardOverlay(this, {
+          offer: starterTrapOffer(this.rng),
+          title: 'INSTALL YOUR FIRST TRAP',
+          subtitle: 'Traps run on their own. You will place it on the next screen.',
+          rerolls: false,
+          onDone: () => {
+            if (run.prewired) {
+              for (const t of run.traps) run.trapLevels[t.id] = Math.max(2, run.trapLevel(t.id));
+              this.rebuildMachine();
+            }
+            this.showAct();
+          },
+        }));
+      },
     }));
   }
 
@@ -261,6 +278,7 @@ export class PlayScene {
     this.round = round;
     this.run.lastPrimary = round.primary.type;
     this.stats = newStats();
+    this.heart.reset();
     this.chain.clear();
     this.rebuildMachine();
     this.timeLeft = round.time;
@@ -319,6 +337,7 @@ export class PlayScene {
         run.won = true;
         this.wins++;
         save('dummy-run-wins', this.wins);
+        this.payout();
         this.engine.push(new VictoryOverlay(this));
         return;
       }
@@ -344,8 +363,16 @@ export class PlayScene {
     this.sfx.fail();
     this.later(1.1, () => {
       if (this.run.lives > 0) this.engine.push(new SecondWindOverlay(this));
-      else this.engine.push(new GameOverOverlay(this));
+      else {
+        this.payout();
+        this.engine.push(new GameOverOverlay(this));
+      }
     });
+  }
+
+  // Rogue-lite: the run's credits go into the facility budget.
+  payout() {
+    this.run.payout = settings.rogueLite ? payRun(this.run) : 0;
   }
 
   // Same ticket, freshly rolled.
@@ -356,6 +383,7 @@ export class PlayScene {
   }
 
   clearArena() {
+    this.gore.clear();
     this.held = null;
     this.entrance.reset();
     this.awaitingEntry = false;
@@ -619,6 +647,8 @@ export class PlayScene {
 
     const c = x === undefined ? dummy.segCenter(seg) : { x, y };
     this.fxNumber(c.x, c.y, dealt, crit, kind);
+    if (!sustained) this.gore.splash(c.x, c.y, Math.min(22, Math.round(dealt / 2)));
+    else if (kind === 'grind' && this.rng.chance(0.6)) this.gore.splash(c.x, c.y, 2, { speed: 0.7 });
     if (dealt >= 30) {
       this.engine.hitStop(0.05);
       this.shake(0.25);
@@ -636,6 +666,7 @@ export class PlayScene {
     if (this.state === 'playing' && run && !env) {
       const st = this.stats;
       st.damage += dealt;
+      this.heart.hit(sustained ? dealt * 0.5 : dealt);
       if (kind === 'impact') st.impact += dealt;
       if (!sustained) st.maxHit = Math.max(st.maxHit, dealt);
       const region = seg.limb ?? seg.group;
@@ -666,6 +697,11 @@ export class PlayScene {
     const limb = dummy.limbs[key];
     const j = limb.joint;
     this.fxFluff(j.x, j.y, 18, 1.4);
+    // Both ends bleed: the torn-off limb and the stump on the body.
+    const stump = limb.root[0] && (limb.root[0].a === j ? limb.root[0].b : limb.root[0].a);
+    this.gore.splash(j.x, j.y, 18, { spread: Math.PI });
+    this.gore.spurt(dummy, j, 1.2);
+    if (stump) this.gore.spurt(dummy, stump, 1.8);
     this.fxText(j.x, j.y - 20, 'RIPPED', C.paper, 18);
     this.sfx.rip();
     this.shake(0.2);
@@ -674,6 +710,7 @@ export class PlayScene {
     const d = Math.hypot(dx, dy) || 1;
     if (!j.pinned) j.addVelocity((dx / d) * 600, (dy / d) * 600 - 300, this.dt);
     if (this.state === 'playing' && this.run) {
+      this.heart.hit(60);
       this.stats.severs++;
       this.run.totals.severs++;
     }
@@ -684,6 +721,7 @@ export class PlayScene {
     dummy.die(this.dt);
     if (this.grabbed?.dummy === dummy) this.releaseGrab(false);
     this.fxFluff(c.x, c.y, 46, 2.4);
+    this.gore.splash(c.x, c.y, 44, { spread: Math.PI, speed: 1.3 });
     for (let i = 0; i < 2; i++) {
       this.particles.spawn({ kind: 'dot', x: dummy.points.head.x, y: dummy.points.head.y, vx: this.rng.range(-400, 400), vy: this.rng.range(-700, -300), gravity: 1600, size: 4.5 * dummy.s, color: C.button, life: 1.6, bounce: 0.5 });
     }
@@ -703,6 +741,7 @@ export class PlayScene {
     }
 
     if (this.state === 'playing' && this.run) {
+      this.heart.arrest();
       this.stats.kills++;
       this.run.totals.kills++;
       this.bonusEvent('kill', {});
@@ -908,6 +947,7 @@ export class PlayScene {
         st.trace.push(st.damage - st.traceLast);
         st.traceLast = st.damage;
       }
+      this.heart.update(dt, this, st.heart, st.elapsed, TRACE_STEP);
     }
     if (this.state === 'playing' && isTop) {
       // Move the held weapon first so a press fires from where it is now.
@@ -955,6 +995,7 @@ export class PlayScene {
 
     this.trail = this.trail.filter((t) => this.time - t.t < 0.14);
     this.particles.update(dt);
+    this.gore.update(dt);
     this.hud.update(dt);
     if (this.combo.t > 0) {
       this.combo.t -= dt;
@@ -1185,6 +1226,7 @@ export class PlayScene {
       ctx.restore();
     }
 
+    this.gore.drawStains(ctx);
     this.renderVent(ctx);
     this.entrance.draw(ctx, 'back');
     this.drawMachine(ctx, 'back');
@@ -1202,6 +1244,7 @@ export class PlayScene {
     this.entrance.draw(ctx, 'front');
     this.renderTrail(ctx);
     this.renderBeam(ctx);
+    this.gore.drawDrops(ctx);
     this.particles.render(ctx);
     if (this.round?.env.blackout && this.state !== 'title') this.renderBlackout(ctx);
     this.renderCursor(ctx);
