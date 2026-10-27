@@ -320,7 +320,7 @@ export const WEAPONS = {
         sc.dealDamage(hit.dummy, hit.seg, dmg, 'knife', { x: hit.x, y: hit.y, limbMult: sc.level('knife') >= 3 ? 2 : 1 });
         sc.addBleed(hit.dummy, hit.seg, 3.5, sc.level('knife') >= 2 ? 6 : 3, 'knife');
         sc.fxFluff(hit.x, hit.y, 3, 0.6);
-        sc.fxSparks(hit.x, hit.y, 3, C.blood);
+        sc.fxSparks(hit.x, hit.y, 3, sc.gore.on ? C.blood : C.fluff);
         sc.sfx.slash();
       });
     },

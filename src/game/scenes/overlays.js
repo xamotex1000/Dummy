@@ -14,6 +14,8 @@ import { REWARD_LABEL } from '../objectives.js';
 import { VARIANTS, ACTS, TWISTS, FLOORS_PER_ACT } from '../variants.js';
 import { REACTIONS, REACTION_IDS } from '../reactions.js';
 import { TRAPS, mountPoints, createTrap, drawTrapIcon, SURFACE_LABEL } from '../traps.js';
+import { settings, setSetting } from '../settings.js';
+import { meta, UPGRADES, upgradeLevel, upgradeCost, buyUpgrade } from '../meta.js';
 import { C, F, font } from '../theme.js';
 
 // ---------------------------------------------------------------- helpers
@@ -22,6 +24,8 @@ const TAU = Math.PI * 2;
 // Masthead height of a report sheet, and the strip a footer needs.
 const HEAD = 58;
 const FOOT = 22;
+// Results charts are sampled every quarter second.
+const TRACE_STEP = 0.25;
 const TODAY = new Date().toISOString().slice(0, 10);
 // Torn printouts draw their own jagged shadow, so sheets skip theirs.
 let shadows = true;
@@ -199,6 +203,43 @@ function checkbox(ctx, x, y, state) {
   ctx.lineCap = 'butt';
 }
 
+// A settings gear, with its hole punched in `bg`.
+function gear(ctx, x, y, r, color, bg) {
+  const teeth = 8;
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) ctx.arc(x, y, i % 2 ? r * 0.74 : r, (i / (teeth * 2)) * TAU, ((i + 1) / (teeth * 2)) * TAU);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = bg;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.32, 0, TAU);
+  ctx.fill();
+}
+
+// A gear button: on paper, or dark on the backdrop.
+function gearButton(ctx, b, { dark = false } = {}) {
+  const bg = dark ? (b.hover ? C.inkLine : C.inkSoft) : b.hover ? C.ruleSoft : C.paper;
+  ctx.fillStyle = bg;
+  ctx.fillRect(b.x, b.y, b.w, b.h);
+  ctx.strokeStyle = dark ? C.paperDim : C.formInk;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5);
+  gear(ctx, b.x + b.w / 2, b.y + b.h / 2, b.h * 0.3, dark ? C.paper : C.formInk, bg);
+}
+
+// An OFF | ON switch, 96 x 28, with the live side filled.
+function toggle(ctx, x, y, on) {
+  const w = 96, h = 28;
+  ctx.fillStyle = on ? '#2f7d43' : C.formInk;
+  ctx.fillRect(on ? x + w / 2 : x, y, w / 2, h);
+  ctx.strokeStyle = C.formInk;
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5);
+  mono(ctx, 'OFF', x + w / 4, y + h / 2 + 1, 12, { weight: 700, color: on ? C.formMuted : C.paper, align: 'center', baseline: 'middle' });
+  mono(ctx, 'ON', x + (w * 3) / 4, y + h / 2 + 1, 12, { weight: 700, color: on ? C.paper : C.formMuted, align: 'center', baseline: 'middle' });
+}
+
 // A boxed verdict like PASS or FAIL, right-aligned at rx. Returns its width.
 function verdict(ctx, s, rx, y, color) {
   const w = measure(ctx, s, 12, F.mono, 700) + 12;
@@ -315,6 +356,137 @@ function traceChart(ctx, x, y, w, h, trace, seconds) {
   }
   mono(ctx, '0s', x + 5, y + h - 5, 9, { color: C.formMuted });
   mono(ctx, `${seconds.toFixed(1)}s`, x + w - 5, y + h - 5, 9, { color: C.formMuted, align: 'right' });
+}
+
+// ---------------------------------------------------- cardiac monitor
+
+// Pink ECG paper: fine squares every 5 px, bold every 25.
+function ecgPaper(ctx, x, y, w, h) {
+  ctx.fillStyle = '#fbf0ee';
+  ctx.fillRect(x, y, w, h);
+  for (let gx = 0; gx <= w; gx += 5) {
+    ctx.fillStyle = gx % 25 ? '#f4d2d0' : '#e8a9a6';
+    ctx.fillRect(Math.round(x + gx), y, 1, h);
+  }
+  for (let gy = 0; gy <= h; gy += 5) {
+    ctx.fillStyle = gy % 25 ? '#f4d2d0' : '#e8a9a6';
+    ctx.fillRect(x, Math.round(y + gy), w, 1);
+  }
+  ctx.strokeStyle = C.formInk;
+  ctx.lineWidth = 1.25;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+}
+
+const inSpan = (list, t) => list.some(([a, b]) => t >= a - 0.05 && t <= b + 0.05);
+const bump = (u, c, s) => Math.exp(-((u - c) * (u - c)) / (2 * s * s));
+
+// One heartbeat, P-QRS-T, around its R peak. Fast hearts squeeze it.
+function beatShape(u, rr) {
+  u /= Math.min(1, Math.max(0.55, rr / 0.8));
+  return 0.12 * bump(u, -0.16, 0.025) - 0.12 * bump(u, -0.028, 0.009) + bump(u, 0, 0.012) - 0.28 * bump(u, 0.028, 0.01) + 0.28 * bump(u, 0.22, 0.045);
+}
+
+// Ventricular fibrillation: a fast, irregular squiggle with no beats in it.
+const fibWave = (t) => (0.5 * Math.sin(t * 31.4) + 0.35 * Math.sin(t * 47.9 + 1.3) + 0.25 * Math.sin(t * 73.1 + 0.7)) * (0.6 + 0.4 * Math.sin(t * 5.3));
+
+// The most telling few seconds: the first shock if there was one, else the
+// fastest stretch.
+function rhythmWindow(rec, elapsed, step, len = 6) {
+  len = Math.min(len, elapsed);
+  let mid;
+  if (rec.fib.length) mid = rec.fib[0][0] + 1.5;
+  else {
+    let best = 0;
+    rec.bpm.forEach((v, i) => {
+      if (v > rec.bpm[best]) best = i;
+    });
+    mid = best * step;
+  }
+  const t0 = clamp(mid - len / 2, 0, Math.max(0, elapsed - len));
+  return [t0, t0 + len];
+}
+
+// The rhythm strip: lead II, true ECG shape, over [t0, t1].
+function rhythmStrip(ctx, x, y, w, h, rec, t0, t1) {
+  ecgPaper(ctx, x, y, w, h);
+  const base = y + h * 0.66;
+  const amp = h * 0.5;
+  const beats = rec.beats.filter((b) => b > t0 - 1 && b < t1 + 1);
+  const value = (t) => {
+    if (inSpan(rec.flat, t)) return 0;
+    if (inSpan(rec.fib, t)) return fibWave(t) * 0.55;
+    let v = 0;
+    for (let i = 0; i < beats.length; i++) {
+      const u = t - beats[i];
+      if (u < -0.4 || u > 0.5) continue;
+      const rr = (beats[i + 1] ?? beats[i] + 0.8) - beats[i];
+      v += beatShape(u, rr);
+    }
+    return v;
+  };
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x + 1, y + 1, w - 2, h - 2);
+  ctx.clip();
+  ctx.strokeStyle = C.formInk;
+  ctx.lineWidth = 1.4;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  for (let px = 0; px <= w; px += 0.5) {
+    const py = base - value(t0 + ((t1 - t0) * px) / w) * amp;
+    if (px) ctx.lineTo(x + px, py);
+    else ctx.moveTo(x + px, py);
+  }
+  ctx.stroke();
+  ctx.restore();
+  mono(ctx, `LEAD II  ·  ${t0.toFixed(1)}-${t1.toFixed(1)} s  ·  25 mm/s`, x + 6, y + 12, 9, { weight: 600, color: '#a5524e' });
+  // Name what's on the strip.
+  const fib = rec.fib.find(([a, b]) => b >= t0 && a <= t1);
+  const flat = rec.flat.find(([a, b]) => b >= t0 && a <= t1);
+  const tag = fib ? 'V-FIB' : flat ? 'ASYSTOLE' : null;
+  if (tag) mono(ctx, tag, x + w - 6, y + 12, 10, { weight: 700, color: C.pen, align: 'right' });
+}
+
+// The whole round's rate, with shocks and flatlines marked.
+function heartTrend(ctx, x, y, w, h, rec, elapsed, step) {
+  ctx.fillStyle = '#f7f3ea';
+  ctx.fillRect(x, y, w, h);
+  const lo = 30, hi = 230;
+  const px = (t) => x + (elapsed > 0 ? (t / elapsed) * w : 0);
+  const py = (v) => y + h - 2 - ((clamp(v, lo, hi) - lo) / (hi - lo)) * (h - 4);
+  for (const v of [60, 120, 180]) {
+    rule(ctx, x, x + w, py(v), C.ruleSoft);
+    mono(ctx, String(v), x + 3, py(v) - 2, 8, { color: C.formMuted });
+  }
+  ctx.fillStyle = 'rgba(124,247,255,0.45)';
+  for (const [a, b] of rec.fib) ctx.fillRect(px(a), y, Math.max(2, px(b) - px(a)), h);
+  ctx.fillStyle = 'rgba(36,33,28,0.18)';
+  for (const [a, b] of rec.flat) ctx.fillRect(px(a), y, Math.max(2, px(b) - px(a)), h);
+  ctx.strokeStyle = C.pen;
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  rec.bpm.forEach((v, i) => {
+    const X = px(i * step), Y = v > 0 ? py(v) : y + h - 2;
+    if (i) ctx.lineTo(X, Y);
+    else ctx.moveTo(X, Y);
+  });
+  ctx.stroke();
+  ctx.strokeStyle = C.formInk;
+  ctx.lineWidth = 1.25;
+  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+  mono(ctx, 'BPM', x + w - 4, y + 10, 8, { weight: 700, color: C.formMuted, align: 'right' });
+}
+
+function heartStats(rec) {
+  const live = rec.bpm.filter((v) => v > 0);
+  return {
+    rest: live.length ? Math.min(...live) : 0,
+    peak: live.length ? Math.max(...live) : 0,
+    avg: live.length ? Math.round(live.reduce((a, b) => a + b, 0) / live.length) : 0,
+    fib: rec.fib.length,
+    arrests: rec.flat.length,
+  };
 }
 
 function hit(b, x, y) {
@@ -578,15 +750,29 @@ class Overlay {
   sheet(ctx, key, w, draw, drop = true) {
     w = Math.min(w, this.frame.w - 32);
     key += `:${Math.round(w)}`;
+    const R = this.ticketRect(w, this.measure(ctx, key, w, draw), drop);
+    this.heights[key] = draw(R.x, R.y, R.w, this.heights[key]);
+    return R;
+  }
+
+  // A sheet layout's height, measured once with an invisible pass.
+  measure(ctx, key, w, draw) {
     if (this.heights[key] === undefined) {
       ctx.save();
       ctx.globalAlpha = 0;
       this.heights[key] = draw(this.frame.x, this.frame.y, w, 200);
       ctx.restore();
     }
-    const R = this.ticketRect(w, this.heights[key], drop);
-    this.heights[key] = draw(R.x, R.y, R.w, this.heights[key]);
-    return R;
+    return this.heights[key];
+  }
+
+  // Picks the fullest layout that fits the frame's height. `variants` are
+  // { key, w, draw } from fullest to most compact; the last one is the
+  // fallback. Returns the chosen one with its width clamped to the frame.
+  fit(ctx, variants) {
+    const room = this.frame.h - 24;
+    const sized = variants.map((v) => ({ ...v, w: Math.min(v.w, this.frame.w - 32) }));
+    return sized.find((v) => this.measure(ctx, `${v.key}:${Math.round(v.w)}`, v.w, v.draw) <= room) ?? sized[sized.length - 1];
   }
 
   // Seconds since the printout came free (or since the overlay opened).
@@ -663,19 +849,36 @@ class Overlay {
   printSheet(ctx, key, w, draw) {
     w = Math.min(w, this.frame.w - 32);
     key += `:${Math.round(w)}`;
-    if (this.heights[key] === undefined) {
-      ctx.save();
-      ctx.globalAlpha = 0;
-      this.heights[key] = draw(this.frame.x, this.frame.y, w, 200);
-      ctx.restore();
-    }
-    const h = this.heights[key];
+    const h = this.measure(ctx, key, w, draw);
     const R = this.ticketRect(w, h, false);
     this.printer.setLength(h);
     const pose = this.printer.pose(0, R.y, h, this.slotY);
     this.drawPrinter(ctx, R.x + R.w / 2, R.w + 44, [pose.torn && { x: R.x, w: R.w, seed: 1 }]);
     this.heights[key] = this.paper(ctx, R.x, R.w, h, pose, 1, (y) => draw(R.x, y, R.w, h));
     return R;
+  }
+
+  // Rogue-lite: what this run paid and a way into the upgrades shop. Adds
+  // this.shopBtn to the buttons. Returns the y below it.
+  renderBudget(ctx, lx, cy, inner, short = false) {
+    if (!settings.rogueLite) return cy;
+    const play = this.play;
+    if (!short) {
+      fields(ctx, lx, cy, inner, [
+        { label: 'CREDITS EARNED', value: `+${play.run.payout ?? 0}`, color: '#2f7d43' },
+        { label: 'FACILITY BUDGET', value: `${meta.credits} CR` },
+      ]);
+      cy += 40 + 10;
+    }
+    if (!this.shopBtn) {
+      this.shopBtn = { x: 0, y: 0, w: 0, h: 42, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
+      this.buttons.push(this.shopBtn);
+      this.keys.u = this.shopBtn.onClick;
+    }
+    Object.assign(this.shopBtn, { x: lx, y: cy, w: inner });
+    const label = short ? `UPGRADES · +${play.run.payout ?? 0} · ${meta.credits} CR` : 'FACILITY UPGRADES';
+    this.drawButton(ctx, this.shopBtn, label, { primary: false, paper: true, key: 'U' });
+    return cy + 42 + 12;
   }
 
   // Title block above a spread of cards or tickets, on the dark backdrop.
@@ -702,7 +905,23 @@ export class TitleOverlay extends Overlay {
   constructor(play) {
     super(play);
     this.tapAnywhere = () => this.close(() => this.play.newRun());
-    this.keys = { enter: this.tapAnywhere, ' ': this.tapAnywhere };
+    this.gearBtn = { x: 0, y: 0, w: 40, h: 40, onClick: () => play.engine.push(new SettingsOverlay(play)) };
+    this.upgradeBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
+    this.keys = { enter: this.tapAnywhere, ' ': this.tapAnywhere, s: this.gearBtn.onClick, u: () => settings.rogueLite && this.upgradeBtn.onClick() };
+  }
+
+  // Settings, and the upgrades shop in rogue-lite, in the top-right corner.
+  renderCorner(ctx) {
+    const L = this.L;
+    Object.assign(this.gearBtn, { x: L.w - 16 - 40, y: 14 });
+    this.buttons = [this.gearBtn];
+    gearButton(ctx, this.gearBtn, { dark: true });
+    if (!settings.rogueLite) return;
+    const label = `UPGRADES · ${meta.credits} CR`;
+    const w = measure(ctx, label, 15, F.body, 700, 2) + 36;
+    Object.assign(this.upgradeBtn, { x: this.gearBtn.x - 10 - w, y: 14, w });
+    this.buttons.push(this.upgradeBtn);
+    this.drawButton(ctx, this.upgradeBtn, label, { primary: false });
   }
 
   update(dt, isTop) {
@@ -763,7 +982,8 @@ export class TitleOverlay extends Overlay {
       { label: 'BEST FLOOR', value: play.bestDepth > 0 ? floorName(play.bestDepth) : '-' },
       { label: 'CERTIFIED RUNS', value: String(play.wins) },
       { label: 'REACTIONS LOGGED', value: `${play.status.discovered.size}/${REACTION_IDS.length}` },
-    ]);
+      settings.rogueLite ? { label: 'CREDITS', value: String(meta.credits), color: '#2f7d43', flex: 0.8 } : null,
+    ].filter(Boolean));
     cy += 40 + 12 + FOOT;
     if (w >= 480) stampMark(ctx, 'CONFIDENTIAL', x + w - 100, y + 31, C.pen, this.t - 0.35, 15);
     return cy - y;
@@ -799,10 +1019,12 @@ export class TitleOverlay extends Overlay {
       ctx.restore();
     }
     const h = this.heights[key];
-    const room = L.h - (short ? 56 : 104);
+    // Phones keep the top strip clear for the corner buttons.
+    const top = wide || short ? 0 : 60;
+    const room = L.h - top - (short ? 56 : 104);
     const s = Math.min(1, room / h);
     const x = wide ? Math.max(48, L.w * 0.06) : (L.w - w * s) / 2;
-    const y = Math.max(12, (room - h * s) / 2 + (short ? 4 : 12)) + (1 - easeOutBack(this.t / 0.45)) * 50;
+    const y = top + Math.max(12, (room - h * s) / 2 + (short ? 4 : 12)) + (1 - easeOutBack(this.t / 0.45)) * 50;
 
     ctx.save();
     ctx.globalAlpha = a;
@@ -815,6 +1037,9 @@ export class TitleOverlay extends Overlay {
 
     const py = y + h * s + (short ? 26 : 44);
     const px = wide ? x + (w * s) / 2 : L.w / 2;
+    ctx.globalAlpha = a * pulse(this.t);
+    ctx.globalAlpha = a;
+    this.renderCorner(ctx);
     ctx.globalAlpha = a * pulse(this.t);
     const verb = this.fine ? 'CLICK OR PRESS SPACE' : 'TAP';
     text(ctx, `${verb} TO BEGIN TESTING`, px, py, short ? 18 : 22, { weight: 700, color: C.paper, align: 'center', spacing: 3, maxWidth: L.w - 24 });
@@ -838,12 +1063,16 @@ export class IntroOverlay extends Overlay {
   }
 
   render(ctx) {
-    const short = this.frame.h < 480;
     const a = this.appear;
     dim(ctx, this.frame, a * 0.7);
     ctx.save();
     ctx.globalAlpha = a;
-    const R = this.sheet(ctx, short ? 'short' : 'full', short ? 540 : this.frame.w >= 600 ? 480 : 420, (x, y, w, h) => this.order(ctx, x, y, w, h, short));
+    const v = this.fit(ctx, [
+      { key: 'full', w: this.frame.w >= 600 ? 480 : 420, draw: (x, y, w, h) => this.order(ctx, x, y, w, h, false) },
+      { key: 'short', w: 540, draw: (x, y, w, h) => this.order(ctx, x, y, w, h, true) },
+    ]);
+    const short = v.key === 'short';
+    const R = this.sheet(ctx, v.key, v.w, v.draw);
     const prompt = this.fine ? 'CLICK OR PRESS SPACE TO BEGIN THE TEST' : 'TAP TO BEGIN THE TEST';
     ctx.globalAlpha = a * pulse(this.t);
     text(ctx, prompt, R.x + R.w / 2, Math.min(this.frame.y + this.frame.h - 12, R.y + R.h + (short ? 28 : 40)), short ? 16 : 18, { weight: 700, color: C.paper, align: 'center', spacing: 2.5 });
@@ -927,12 +1156,27 @@ export class ClearOverlay extends Overlay {
     dim(ctx, this.frame, a * 0.7);
     ctx.save();
     ctx.globalAlpha = a;
-    const short = this.frame.h < 480;
-    this.printSheet(ctx, short ? 'short' : 'full', short ? 540 : 460, (x, y, w, h) => this.results(ctx, x, y, w, h, short));
+    // Short frames lose the damage trace, then the injury diagram, then
+    // the cardiac monitor.
+    const v = this.fit(ctx, [
+      // Desktop: injury and cardiac side by side.
+      ...(this.frame.w >= 800 ? [
+        { key: 'wide', w: 760, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { wide: true, trace: true }) },
+        { key: 'wide-short', w: 760, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { wide: true }) },
+      ] : []),
+      { key: 'full', w: 460, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { injury: true, heart: true, trace: true }) },
+      { key: 'heart+injury', w: 460, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { injury: true, heart: true }) },
+      { key: 'heart', w: 500, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { heart: true }) },
+      // Landscape phones: objectives beside the monitor.
+      ...(this.frame.w >= 720 ? [{ key: 'side', w: 760, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, { side: true }) }] : []),
+      { key: 'short', w: 540, draw: (x, y, w, h) => this.results(ctx, x, y, w, h, {}) },
+    ]);
+    this.printSheet(ctx, v.key, v.w, v.draw);
     ctx.restore();
   }
 
-  results(ctx, x, y, w, h, short) {
+  results(ctx, x, y, w, h, { injury = false, heart = false, trace = false, wide = false, side = false }) {
+    const short = !injury && !heart && !trace && !wide && !side;
     const play = this.play;
     const round = play.round;
     const st = play.stats;
@@ -952,49 +1196,38 @@ export class ClearOverlay extends Overlay {
     cy += 40;
 
     cy += 30;
-    section(ctx, lx, cy, inner, 1, 'OBJECTIVES');
+    // Side by side, the objectives take the left half and the monitor the right.
+    const ow = side ? (inner - 24) / 2 : inner;
+    const orx = lx + ow;
+    const sideTop = cy;
+    section(ctx, lx, cy, ow, 1, 'OBJECTIVES');
     cy += 28;
     checkbox(ctx, lx, cy - 14, 'done');
-    const vw = verdict(ctx, 'PASS', rx, cy, '#2f7d43');
-    text(ctx, round.primary.label, lx + 26, cy, 17, { weight: 700, maxWidth: inner - 36 - vw });
+    const vw = verdict(ctx, 'PASS', orx, cy, '#2f7d43');
+    text(ctx, round.primary.label, lx + 26, cy, 17, { weight: 700, maxWidth: ow - 36 - vw });
     cy += 27;
     checkbox(ctx, lx, cy - 14, sec.state);
-    const sw = verdict(ctx, perfect ? 'PASS' : 'FAIL', rx, cy, perfect ? '#2f7d43' : C.pen);
-    text(ctx, sec.label, lx + 26, cy, 17, { weight: 700, color: perfect ? C.formInk : C.formMuted, maxWidth: inner - 36 - sw });
+    const sw = verdict(ctx, perfect ? 'PASS' : 'FAIL', orx, cy, perfect ? '#2f7d43' : C.pen);
+    text(ctx, sec.label, lx + 26, cy, 17, { weight: 700, color: perfect ? C.formInk : C.formMuted, maxWidth: ow - 36 - sw });
     cy += 18;
-    text(ctx, perfect ? 'Secondary met: extra card unlocked' : 'Secondary not met', lx + 26, cy, 13, { weight: 600, color: perfect ? '#2f7d43' : C.pen });
+    text(ctx, perfect ? 'Secondary met: extra card unlocked' : 'Secondary not met', lx + 26, cy, 13, { weight: 600, color: perfect ? '#2f7d43' : C.pen, maxWidth: ow - 26 });
+    if (side) cy = Math.max(cy, this.heartBlock(ctx, st, orx + 24, sideTop, ow, 2, true));
 
-    if (!short) {
+    let n = 2;
+    if (wide) {
+      // Injury and cardiac side by side.
       cy += 34;
-      section(ctx, lx, cy, inner, 2, 'INJURY ASSESSMENT', { right: 'G A M P' });
-      cy += 14;
-      const groups = regionGroups(st.regions);
-      const max = Math.max(1, ...Object.values(groups));
-      const figH = 132;
-      injuryFigure(ctx, lx + 40, cy, figH, groups);
-      RATE_LETTERS.forEach((_, i) => rateBox(ctx, i, lx + 4 + i * 19, cy + figH + 8, 15));
-      const tx = lx + 104;
-      let ty = cy + 14;
-      caption(ctx, 'REGION', tx, ty);
-      caption(ctx, 'DAMAGE', rx - 26, ty, { align: 'right' });
-      ty += 6;
-      for (const [name, g] of [['Head', 'head'], ['Torso', 'torso'], ['Arms', 'arms'], ['Legs', 'legs']]) {
-        ty += 21;
-        text(ctx, name, tx, ty, 15, { weight: 600 });
-        mono(ctx, String(Math.round(groups[g])), rx - 26, ty, 14, { weight: 600, align: 'right' });
-        rateBox(ctx, rateIdx(groups[g], max), rx - 16, ty - 12, 16);
-        rule(ctx, tx, rx, ty + 6, C.ruleSoft);
-      }
-      ty += 10;
-      for (const [name, val] of [['Peak hit', Math.round(st.maxHit)], ['Reactions', st.reactions], ['Limbs torn', st.severs]]) {
-        ty += 20;
-        text(ctx, name, tx, ty, 14, { weight: 500, color: C.formMuted });
-        mono(ctx, String(val), rx, ty, 14, { weight: 600, align: 'right' });
-      }
-      cy += Math.max(figH + 24, ty - cy + 8);
-
+      const colW = (inner - 24) / 2;
+      const a = this.injuryBlock(ctx, st, lx, cy, colW, n++);
+      const b = this.heartBlock(ctx, st, lx + colW + 24, cy, colW, n++);
+      cy = Math.max(a, b);
+    } else {
+      if (injury) cy = this.injuryBlock(ctx, st, lx, cy + 34, inner, n++);
+      if (heart) cy = this.heartBlock(ctx, st, lx, cy + (injury ? 26 : 34), inner, n++);
+    }
+    if (trace) {
       cy += 26;
-      section(ctx, lx, cy, inner, 3, 'DAMAGE TRACE', { right: 'PER 0.25 s' });
+      section(ctx, lx, cy, inner, n++, 'DAMAGE TRACE', { right: 'PER 0.25 s' });
       cy += 10;
       traceChart(ctx, lx, cy, inner, 58, st.trace, st.elapsed);
       cy += 58;
@@ -1006,6 +1239,57 @@ export class ClearOverlay extends Overlay {
     cy += 50 + 14 + (short ? 0 : FOOT);
     stampMark(ctx, perfect ? 'PERFECT' : 'PASSED', rx - 62, y + 32, perfect ? C.accent : '#2f7d43', this.since - 0.05);
     return cy - y;
+  }
+
+  // The injury diagram and region table. Returns the y below it.
+  injuryBlock(ctx, st, x, cy, w, num) {
+    const rx = x + w;
+    section(ctx, x, cy, w, num, 'INJURY ASSESSMENT', { right: 'G A M P' });
+    cy += 14;
+    const groups = regionGroups(st.regions);
+    const max = Math.max(1, ...Object.values(groups));
+    const figH = 132;
+    injuryFigure(ctx, x + 40, cy, figH, groups);
+    RATE_LETTERS.forEach((_, i) => rateBox(ctx, i, x + 4 + i * 19, cy + figH + 8, 15));
+    const tx = x + 104;
+    let ty = cy + 14;
+    caption(ctx, 'REGION', tx, ty);
+    caption(ctx, 'DAMAGE', rx - 26, ty, { align: 'right' });
+    ty += 6;
+    for (const [name, g] of [['Head', 'head'], ['Torso', 'torso'], ['Arms', 'arms'], ['Legs', 'legs']]) {
+      ty += 21;
+      text(ctx, name, tx, ty, 15, { weight: 600 });
+      mono(ctx, String(Math.round(groups[g])), rx - 26, ty, 14, { weight: 600, align: 'right' });
+      rateBox(ctx, rateIdx(groups[g], max), rx - 16, ty - 12, 16);
+      rule(ctx, tx, rx, ty + 6, C.ruleSoft);
+    }
+    ty += 10;
+    for (const [name, val] of [['Peak hit', Math.round(st.maxHit)], ['Reactions', st.reactions], ['Limbs torn', st.severs]]) {
+      ty += 20;
+      text(ctx, name, tx, ty, 14, { weight: 500, color: C.formMuted });
+      mono(ctx, String(val), rx, ty, 14, { weight: 600, align: 'right' });
+    }
+    return cy + Math.max(figH + 24, ty - cy + 8);
+  }
+
+  // The rhythm strip, the rate over the round and the readouts. Returns
+  // the y below it.
+  heartBlock(ctx, st, x, cy, w, num, compact = false) {
+    const rec = st.heart;
+    const hs = heartStats(rec);
+    section(ctx, x, cy, w, num, 'CARDIAC MONITOR', { right: `PEAK ${hs.peak} BPM`, rightColor: C.pen });
+    cy += 10;
+    const [t0, t1] = rhythmWindow(rec, st.elapsed, TRACE_STEP);
+    const stripH = compact ? 52 : 60;
+    const trendH = compact ? 30 : 38;
+    rhythmStrip(ctx, x, cy, w, stripH, rec, t0, t1);
+    cy += stripH + 6;
+    heartTrend(ctx, x, cy, w, trendH, rec, st.elapsed, TRACE_STEP);
+    cy += trendH + 15;
+    const parts = [`REST ${hs.rest}`, `AVG ${hs.avg}`, `PEAK ${hs.peak}`, `V-FIB ${hs.fib}`, `ARREST ${hs.arrests}`];
+    const size = w < 300 ? 9 : 10;
+    parts.forEach((p, i) => mono(ctx, p, x + (w * i) / (parts.length - 1), cy, size, { weight: 600, color: (i === 3 && hs.fib) || (i === 4 && hs.arrests) ? C.pen : C.formInk, align: i === 0 ? 'left' : i === parts.length - 1 ? 'right' : 'center' }));
+    return cy;
   }
 }
 
@@ -1359,17 +1643,21 @@ export class PauseOverlay extends Overlay {
     this.resume = mk(() => this.close());
     this.restart = mk(() => this.close(() => this.play.newRun()));
     this.quit = mk(() => this.close(() => this.play.quitToTitle()));
-    this.buttons = [this.resume, this.restart, this.quit];
-    this.keys = { escape: this.resume.onClick, p: this.resume.onClick, enter: this.resume.onClick };
+    this.gearBtn = { x: 0, y: 0, w: 36, h: 36, onClick: () => play.engine.push(new SettingsOverlay(play)) };
+    this.buttons = [this.resume, this.restart, this.quit, this.gearBtn];
+    this.keys = { escape: this.resume.onClick, p: this.resume.onClick, enter: this.resume.onClick, s: this.gearBtn.onClick };
   }
 
   render(ctx) {
     const a = this.appear;
     dim(ctx, this.frame, a * 1.1);
-    const showCodex = this.frame.h >= 560;
     ctx.save();
     ctx.globalAlpha = a;
-    this.sheet(ctx, showCodex ? 'codex' : 'plain', showCodex ? 460 : 380, (x, y, w, h) => this.body(ctx, x, y, w, h, showCodex), false);
+    const v = this.fit(ctx, [
+      { key: 'codex', w: 460, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+      { key: 'plain', w: 380, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+    ]);
+    this.sheet(ctx, v.key, v.w, v.draw, false);
     ctx.restore();
   }
 
@@ -1377,7 +1665,9 @@ export class PauseOverlay extends Overlay {
     const play = this.play;
     const lx = x + 18;
     const inner = w - 36;
-    report(ctx, x, y, w, h, 'TEST SUSPENDED', { tone: C.ctYellow, kicker: kicker(play), form: showCodex ? 'FORM DR-5 · INTERRUPTION NOTICE' : null });
+    report(ctx, x, y, w, h, 'TEST SUSPENDED', { tone: C.ctYellow, kicker: kicker(play), form: showCodex ? 'FORM DR-5 · INTERRUPTION NOTICE' : null, reserve: 48 });
+    Object.assign(this.gearBtn, { x: x + w - 18 - 36, y: y + 14 });
+    gearButton(ctx, this.gearBtn);
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
       { label: 'FLOOR', value: `${play.round.act}-${play.round.floor}` },
@@ -1693,14 +1983,17 @@ export class GameOverOverlay extends Overlay {
     dim(ctx, this.frame, a * 0.8);
     ctx.save();
     ctx.globalAlpha = a;
-    this.printSheet(ctx, 'go', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
+    const v = this.fit(ctx, [
+      { key: 'full', w: 440, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+      { key: 'short', w: 440, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+    ]);
+    this.printSheet(ctx, v.key, v.w, v.draw);
     ctx.restore();
   }
 
-  body(ctx, x, y, w, h) {
+  body(ctx, x, y, w, h, short) {
     const play = this.play;
     const run = play.run;
-    const short = this.frame.h < 480;
     const lx = x + 18;
     const rx = x + w - 18;
     const inner = w - 36;
@@ -1716,12 +2009,15 @@ export class GameOverOverlay extends Overlay {
     cy += 40 + 30;
     section(ctx, lx, cy, inner, 1, 'RUN SUMMARY');
     cy = summaryTable(ctx, runRows(run, fav).slice(0, short ? 2 : 99), lx, rx, cy + 2);
-    cy += 32;
-    section(ctx, lx, cy, inner, 2, 'COMPONENTS INSTALLED', { right: String(run.taken.length) });
-    const cards = run.taken.length ? run.taken.join(', ') : 'None';
-    cy += 6;
-    cy += paragraph(ctx, cards, lx, cy + 16, inner, 14, 18, { maxLines: short ? 1 : 4 });
+    if (!short) {
+      cy += 32;
+      section(ctx, lx, cy, inner, 2, 'COMPONENTS INSTALLED', { right: String(run.taken.length) });
+      const cards = run.taken.length ? run.taken.join(', ') : 'None';
+      cy += 6;
+      cy += paragraph(ctx, cards, lx, cy + 16, inner, 14, 18, { maxLines: 4 });
+    }
     cy += 18;
+    cy = this.renderBudget(ctx, lx, cy, inner, short);
     Object.assign(this.btn, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.btn, 'NEW RUN', { key: 'SPACE' });
     stampMark(ctx, 'VOID', rx - 46, y + 31, C.pen, this.since - 0.05, 24);
@@ -1744,13 +2040,16 @@ export class VictoryOverlay extends Overlay {
     dim(ctx, this.frame, a * 0.9);
     ctx.save();
     ctx.globalAlpha = a;
-    this.printSheet(ctx, 'win', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
+    const v = this.fit(ctx, [
+      { key: 'full', w: 440, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+      { key: 'short', w: 440, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+    ]);
+    this.printSheet(ctx, v.key, v.w, v.draw);
     ctx.restore();
   }
 
-  body(ctx, x, y, w, h) {
+  body(ctx, x, y, w, h, short) {
     const run = this.play.run;
-    const short = this.frame.h < 480;
     const lx = x + 18;
     const rx = x + w - 18;
     const inner = w - 36;
@@ -1762,12 +2061,16 @@ export class VictoryOverlay extends Overlay {
       { label: 'CERTIFIED RUNS', value: String(this.play.wins) },
       { label: 'RESULT', value: 'DESTROYED', color: '#2f7d43' },
     ]);
-    cy += 40 + 24;
-    text(ctx, 'Keep going for endless floors with tougher dummies.', lx, cy, 15, { weight: 500, color: C.formMuted, maxWidth: inner });
+    cy += 40;
+    if (!short) {
+      cy += 24;
+      text(ctx, 'Keep going for endless floors with tougher dummies.', lx, cy, 15, { weight: 500, color: C.formMuted, maxWidth: inner });
+    }
     cy += 28;
     section(ctx, lx, cy, inner, 1, 'RUN SUMMARY');
     cy = summaryTable(ctx, runRows(run, fav).slice(0, short ? 2 : 99), lx, rx, cy + 2);
     cy += 20;
+    cy = this.renderBudget(ctx, lx, cy, inner, short);
     Object.assign(this.endless, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.endless, 'KEEP TESTING', { key: 'SPACE' });
     cy += 60;
@@ -1906,5 +2209,209 @@ export class PlaceOverlay extends Overlay {
     text(ctx, `Mounts on the ${where}. ${hover?.occupant ? `Replaces the ${TRAPS[hover.occupant.id].name}.` : 'Pick a target.'}`, cx, top + 78, 15, { weight: 500, color: C.formMuted, align: 'center', maxWidth: R.w - 32 });
     this.drawButton(ctx, this.skip, 'SKIP THIS TRAP', { primary: false });
     ctx.restore();
+  }
+}
+
+// ------------------------------------------------------------- settings
+
+// Opened from the gear on the pause sheet or the title screen.
+export class SettingsOverlay extends Overlay {
+  constructor(play) {
+    super(play);
+    this.blocksUpdate = true;
+    this.rows = [
+      { key: 'gore', title: 'Gore', desc: 'Blood splashes, stains the cell and pumps from torn limbs. Off: stuffing only.' },
+      { key: 'rogueLite', title: 'Rogue-lite mode', desc: 'Runs pay out credits when they end. Spend them on permanent facility upgrades that apply from your next run. Off: every run starts from scratch.' },
+    ].map((r) => ({ ...r, x: 0, y: 0, w: 0, h: 0, onClick: () => this.flip(r.key) }));
+    this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };
+    this.shop = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
+    this.keys = { escape: this.done.onClick, enter: this.done.onClick, s: this.done.onClick, 1: () => this.flip('gore'), 2: () => this.flip('rogueLite') };
+  }
+
+  flip(key) {
+    setSetting(key, !settings[key]);
+    this.play.sfx.select();
+  }
+
+  render(ctx) {
+    const a = this.appear;
+    dim(ctx, this.frame, a * 0.9);
+    ctx.save();
+    ctx.globalAlpha = a;
+    // The rogue-lite row adds the shop button, so each state measures apart.
+    const rl = settings.rogueLite;
+    const v = this.fit(ctx, [
+      { key: `full:${rl}`, w: 460, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+      { key: `short:${rl}`, w: 460, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+    ]);
+    this.sheet(ctx, v.key, v.w, v.draw, false);
+    ctx.restore();
+  }
+
+  body(ctx, x, y, w, h, short) {
+    const lx = x + 18;
+    const rx = x + w - 18;
+    const inner = w - 36;
+    report(ctx, x, y, w, h, 'FACILITY SETTINGS', { kicker: `DUMMY RUN TEST FACILITY  ·  ${TODAY}`, form: short ? null : 'FORM DR-2 · OPERATING PARAMETERS' });
+    let cy = y + HEAD + 8;
+    this.buttons = [];
+    this.rows.forEach((r, i) => {
+      if (short) cy += 6;
+      else {
+        cy += 28;
+        section(ctx, lx, cy, inner, i + 1, i ? 'TEST PROGRAM' : 'DISPLAY');
+        cy += 12;
+      }
+      const rowTop = cy;
+      // Last frame's row height; rows don't change size on hover.
+      if (r.hover) {
+        ctx.fillStyle = C.ruleSoft;
+        ctx.fillRect(lx - 6, rowTop, inner + 12, r.h);
+      }
+      cy += 22;
+      text(ctx, r.title, lx, cy, 18, { weight: 700 });
+      if (this.fine) keycap(ctx, String(i + 1), lx + measure(ctx, r.title, 18, F.body, 700) + 10, cy - 6);
+      toggle(ctx, rx - 96, cy - 20, settings[r.key]);
+      cy += paragraph(ctx, r.desc, lx, cy + 19, inner - 110, 14, 18, { color: C.formMuted, maxLines: short ? 2 : 4 }) + 4;
+      Object.assign(r, { x: lx - 6, y: rowTop, w: inner + 12, h: cy - rowTop + 4 });
+      this.buttons.push(r);
+    });
+    if (settings.rogueLite) {
+      cy += 14;
+      Object.assign(this.shop, { x: lx, y: cy, w: inner });
+      this.drawButton(ctx, this.shop, `FACILITY UPGRADES · ${meta.credits} CR`, { primary: false, paper: true });
+      this.buttons.push(this.shop);
+      cy += this.shop.h;
+    }
+    cy += 16;
+    Object.assign(this.done, { x: lx, y: cy, w: inner });
+    this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
+    this.buttons.push(this.done);
+    return cy + this.done.h + 14 + (short ? 0 : FOOT) - y;
+  }
+}
+
+// ------------------------------------------------------------- upgrades
+
+// The rogue-lite shop: spend credits on upgrades that apply to new runs.
+export class UpgradeOverlay extends Overlay {
+  constructor(play) {
+    super(play);
+    this.blocksUpdate = true;
+    this.items = UPGRADES.map((u) => ({ u, x: 0, y: 0, w: 0, h: 0, onClick: () => this.buy(u) }));
+    this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };
+    this.keys = { escape: this.done.onClick, enter: this.done.onClick, u: this.done.onClick };
+    this.items.forEach((it, i) => {
+      this.keys[String(i + 1)] = it.onClick;
+    });
+    this.flash = null;
+  }
+
+  buy(u) {
+    if (buyUpgrade(u)) {
+      this.play.sfx.install();
+      this.flash = { id: u.id, t: 0.5 };
+    } else {
+      this.play.sfx.bonusFail();
+    }
+  }
+
+  update(dt, isTop) {
+    if (this.flash) {
+      this.flash.t -= dt;
+      if (this.flash.t <= 0) this.flash = null;
+    }
+    super.update(dt, isTop);
+  }
+
+  render(ctx) {
+    const a = this.appear;
+    dim(ctx, this.frame, a * 1.1);
+    ctx.save();
+    ctx.globalAlpha = a;
+    const variants = [{ key: 'one', w: 500, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, 1) }];
+    if (this.frame.w >= 720) variants.push({ key: 'two', w: 780, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, 2) });
+    const v = this.fit(ctx, variants);
+    this.sheet(ctx, v.key, v.w, v.draw, false);
+    ctx.restore();
+  }
+
+  body(ctx, x, y, w, h, cols) {
+    const play = this.play;
+    const lx = x + 18;
+    const inner = w - 36;
+    const compact = cols === 2;
+    report(ctx, x, y, w, h, 'FACILITY UPGRADES', { tone: '#2f7d43', kicker: `CAPITAL REQUISITION  ·  ${TODAY}`, form: compact ? null : 'FORM DR-15 · CAPITAL REQUISITION', reserve: compact ? 150 : 0 });
+    let cy = y + HEAD + 12;
+    const owned = UPGRADES.reduce((n, u) => n + upgradeLevel(u.id), 0);
+    const total = UPGRADES.reduce((n, u) => n + u.costs.length, 0);
+    if (compact) {
+      mono(ctx, `BUDGET ${meta.credits} CR`, x + w - 18, y + 46, 15, { weight: 700, color: '#2f7d43', align: 'right' });
+    } else {
+      fields(ctx, lx, cy, inner, [
+        { label: 'FACILITY BUDGET', value: `${meta.credits} CR`, color: '#2f7d43' },
+        { label: 'UPGRADES OWNED', value: `${owned}/${total}` },
+      ]);
+      cy += 40 + 4;
+    }
+    const note = play.state === 'title' ? 'Upgrades apply to every new run while rogue-lite mode is on.' : 'Upgrades you buy now apply when your next run starts.';
+    cy += 20;
+    text(ctx, note, lx, cy, 14, { weight: 500, color: C.formMuted, maxWidth: inner });
+    cy += 4;
+
+    const colW = (inner - (cols - 1) * 16) / cols;
+    const rowH = compact ? 44 : 52;
+    const perCol = Math.ceil(this.items.length / cols);
+    this.items.forEach((it, i) => {
+      const col = Math.floor(i / perCol);
+      const row = i % perCol;
+      const rx0 = lx + col * (colW + 16);
+      const ry = cy + 8 + row * rowH;
+      this.drawItem(ctx, it, i, rx0, ry, colW, rowH);
+    });
+    cy += 8 + perCol * rowH + 12;
+    Object.assign(this.done, { x: lx, y: cy, w: inner });
+    this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
+    this.buttons = [...this.items, this.done];
+    return cy + this.done.h + 14 + (compact ? 0 : FOOT) - y;
+  }
+
+  drawItem(ctx, it, i, x, y, w, h) {
+    const u = it.u;
+    const lv = upgradeLevel(u.id);
+    const cost = upgradeCost(u);
+    const afford = cost !== null && meta.credits >= cost;
+    if (this.flash?.id === u.id) {
+      ctx.fillStyle = `rgba(95,211,138,${this.flash.t * 0.6})`;
+      ctx.fillRect(x - 6, y, w + 12, h - 4);
+    } else if (it.hover && afford) {
+      ctx.fillStyle = C.ruleSoft;
+      ctx.fillRect(x - 6, y, w + 12, h - 4);
+    }
+    Object.assign(it, { x: x - 6, y, w: w + 12, h: h - 4 });
+    mono(ctx, `U-${String(i + 1).padStart(2, '0')}`, x, y + 18, 10, { weight: 600, color: C.formMuted });
+    const tx = x + 40;
+    const bw = 86;
+    text(ctx, u.name, tx, y + 19, 16, { weight: 700, maxWidth: w - 40 - bw - 60 });
+    // Level pips.
+    const pipX = tx + Math.min(measure(ctx, u.name, 16, F.body, 700), w - 40 - bw - 60) + 10;
+    for (let k = 0; k < u.costs.length; k++) {
+      ctx.fillStyle = k < lv ? '#2f7d43' : C.ruleSoft;
+      ctx.fillRect(pipX + k * 11, y + 9, 8, 10);
+    }
+    text(ctx, u.desc, tx, y + 37, 13, { weight: 500, color: C.formMuted, maxWidth: w - 40 - bw - 10 });
+    // Price tag.
+    const bx = x + w - bw, by = y + 8;
+    const label = cost === null ? 'MAXED' : `${cost} CR`;
+    if (cost !== null && afford) {
+      ctx.fillStyle = C.formInk;
+      ctx.fillRect(bx, by, bw, 28);
+    }
+    ctx.strokeStyle = cost === null ? '#2f7d43' : afford ? C.formInk : C.rule;
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx + 0.75, by + 0.75, bw - 1.5, 26.5);
+    mono(ctx, label, bx + bw / 2, by + 15, 12, { weight: 700, color: cost === null ? '#2f7d43' : afford ? C.paper : C.rule, align: 'center', baseline: 'middle' });
+    if (this.fine && cost !== null) keycap(ctx, String(i + 1), bx - keyW(ctx, String(i + 1)) - 8, by + 14);
+    rule(ctx, x, x + w, y + h - 4, C.ruleSoft);
   }
 }

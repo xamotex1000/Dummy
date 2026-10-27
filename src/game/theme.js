@@ -56,6 +56,8 @@ export const RGB = {
   burlap: hexToRgb(C.burlap),
   burlapBoss: hexToRgb(C.burlapBoss),
   bruise: hexToRgb(C.bruise),
+  // Bruising with gore off: grime instead of blood.
+  grime: hexToRgb('#6b5236'),
   char: hexToRgb(C.char),
   white: [255, 255, 255],
   ice: hexToRgb('#a9dcf5'),
