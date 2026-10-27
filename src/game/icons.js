@@ -520,3 +520,24 @@ export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
   ctx.stroke();
   ctx.restore();
 }
+
+// The yellow-and-black quadrant marker taped to crash test dummies.
+export function drawTarget(ctx, x, y, r, { alpha = 1 } = {}) {
+  ctx.save();
+  ctx.globalAlpha *= alpha;
+  const Q = Math.PI / 2;
+  for (let q = 0; q < 4; q++) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, r, (q - 1) * Q, q * Q);
+    ctx.closePath();
+    ctx.fillStyle = q % 2 ? C.ctYellow : C.formInk;
+    ctx.fill();
+  }
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.lineWidth = Math.max(1, r * 0.12);
+  ctx.strokeStyle = C.formInk;
+  ctx.stroke();
+  ctx.restore();
+}

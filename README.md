@@ -15,9 +15,11 @@ python3 -m http.server 8000
 
 It's designed desktop-first and adapts down to phones:
 
-- **Desktop (900px wide and up):** a clipboard sidebar holds the floor, timer, work order, bonus, your arsenal and the cards you've taken. The arena fills the rest of the screen. Menus and card drafts sit over the arena, so the sidebar stays readable while you choose.
-- **Phone, portrait:** a top strip with the work order, and a weapon rack along the bottom.
+- **Desktop (900px wide and up):** a sidebar holds the floor, timer, test order, secondary objective, your arsenal and the cards you've taken. The arena fills the rest of the screen. Menus and card drafts sit over the arena, so the sidebar stays readable while you choose.
+- **Phone, portrait:** a top strip with the test order, and a weapon rack along the bottom.
 - **Phone, landscape:** a two-row strip, and the arena zooms in so the dummy stays readable.
+
+Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) and a chart-recorder trace of your damage over the round.
 
 The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
 
@@ -192,7 +194,7 @@ src/
     icons.js         vector weapon icons and grip-origin held weapon sprites
     sfx.js, theme.js
     scenes/play.js   the arena: damage pipeline, physics callbacks, run flow, act hazards
-    scenes/overlays.js  title, routes, acts, work order, results, cards, pause + codex, run end
+    scenes/overlays.js  report-sheet UI: title, routes, acts, test order, results, cards, pause + codex, run end
   main.js
 ```
 

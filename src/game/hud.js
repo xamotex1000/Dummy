@@ -1,9 +1,9 @@
-// In-game HUD. Desktop gets a clipboard sidebar (round, timer, work order,
-// bonus, arsenal); narrow screens get a top strip and a bottom weapon rack.
+// In-game HUD. Desktop gets a clipboard sidebar (round, timer, test order,
+// secondary, arsenal); narrow screens get a top strip and a bottom weapon rack.
 
 import { roundRectPath, wrapText } from '../engine/renderer.js';
 import { clamp } from '../engine/math.js';
-import { drawWeaponIcon } from './icons.js';
+import { drawWeaponIcon, drawTarget } from './icons.js';
 import { WEAPONS } from './weapons.js';
 import { describeProgress, primaryProgress } from './objectives.js';
 import { VARIANTS, TWISTS } from './variants.js';
@@ -216,9 +216,10 @@ export class Hud {
 
     ctx.textBaseline = 'alphabetic';
     ctx.textAlign = 'left';
+    drawTarget(ctx, pad + 10, 37, 10);
     ctx.font = font(20, F.display, 400);
     ctx.fillStyle = C.paper;
-    ctx.fillText('DUMMY RUN', pad, 44);
+    ctx.fillText('DUMMY RUN', pad + 28, 44);
     this.pauseButton(ctx);
     this.stitch(ctx, pad, 66, W - pad, 66);
 
@@ -275,7 +276,7 @@ export class Hud {
     if (round.boss) cx = this.chip(ctx, 'BOSS', cx, y - 17, C.bad, C.ink) + 6;
     if (sc.run.lives > 0) this.chip(ctx, `1UP x${sc.run.lives}`, cx, y - 17, C.gold, C.ink);
     ctx.textAlign = 'right';
-    ctx.font = font(32, F.display, 400);
+    ctx.font = font(30, F.mono, 700);
     ctx.fillStyle = this.timerColor();
     ctx.fillText(`${Math.ceil(Math.max(0, sc.timeLeft))}s`, W - pad, y + 2);
     y += 16;
@@ -291,8 +292,8 @@ export class Hud {
     const stats = sc.stats;
     const prog = primaryProgress(round, stats) / round.primary.target;
     y += 40;
-    label(ctx, 'WORK ORDER', pad, y, C.muted);
-    ctx.font = font(15, F.body, 600);
+    label(ctx, 'TEST ORDER', pad, y, C.muted);
+    ctx.font = font(13, F.mono, 600);
     ctx.textAlign = 'right';
     ctx.fillStyle = prog >= 1 ? C.good : C.paperDim;
     ctx.fillText(describeProgress(round, stats), W - pad, y);
@@ -315,7 +316,7 @@ export class Hud {
     const sec = round.secondary;
     y += 18;
     const tagColor = sec.state === 'failed' ? C.bad : sec.state === 'done' ? C.good : C.accent;
-    label(ctx, 'BONUS · OPTIONAL', pad, y, tagColor);
+    label(ctx, 'SECONDARY · OPTIONAL', pad, y, tagColor);
     const [status, statusColor] = this.bonusStatus();
     if (this.secPulse > 0) ctx.globalAlpha = 0.4 + 0.6 * Math.abs(Math.sin(this.secPulse * 18));
     ctx.font = font(15, F.body, 700);
@@ -495,7 +496,7 @@ export class Hud {
       ctx.font = font(16, F.body, 700);
       ctx.fillText(round.primary.label, x, 22);
       ctx.textAlign = 'right';
-      ctx.font = font(20, F.display, 400);
+      ctx.font = font(19, F.mono, 700);
       ctx.fillStyle = this.timerColor();
       ctx.fillText(`${Math.ceil(Math.max(0, sc.timeLeft))}s`, right, 23);
       const tw = ctx.measureText('00s').width + 14;
@@ -526,7 +527,7 @@ export class Hud {
     if (round.boss) x = this.chip(ctx, 'BOSS', x, 13, C.bad, C.ink) + 6;
     if (sc.run.lives > 0) this.chip(ctx, `1UP x${sc.run.lives}`, x, 13, C.gold, C.ink);
     ctx.textAlign = 'right';
-    ctx.font = font(22, F.display, 400);
+    ctx.font = font(21, F.mono, 700);
     ctx.fillStyle = this.timerColor();
     ctx.fillText(`${Math.ceil(Math.max(0, sc.timeLeft))}s`, right, 29);
     const barW = L.w - pad * 2;
