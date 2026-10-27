@@ -1,5 +1,7 @@
-// Dummy Run entry point.
+// Crash Test entry point.
 
+// First, so saved data moves to the new keys before anything reads it.
+import './game/migrate.js';
 import { Engine } from './engine/core.js';
 import { PlayScene } from './game/scenes/play.js';
 
@@ -13,4 +15,4 @@ engine.start();
 document.fonts?.ready.then(() => engine.resize());
 
 // Handy for poking at the game from the console.
-window.dummyRun = { engine, play };
+window.crashTest = { engine, play };

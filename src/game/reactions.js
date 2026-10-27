@@ -15,7 +15,7 @@ export const REACTIONS = {
 
 export const REACTION_IDS = Object.keys(REACTIONS);
 
-const KEY = 'dummy-run-reactions';
+const KEY = 'crash-test-reactions';
 
 export function loadDiscovered() {
   try {

@@ -1,7 +1,7 @@
 // Player settings, kept between sessions. Storage is optional: without it
 // the defaults hold for the session.
 
-const KEY = 'dummy-run-settings';
+const KEY = 'crash-test-settings';
 
 const DEFAULTS = {
   // Blood that splashes and stains the cell. Off swaps it all for stuffing.

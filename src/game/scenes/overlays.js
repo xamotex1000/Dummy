@@ -325,18 +325,18 @@ export class TitleOverlay extends Overlay {
     if (isTop && this.tapAnywhere && !this.buttons.some((b) => b.hover)) this.play.engine.cursor = 'pointer';
   }
 
-  // The logo, set on paper: DUMMY in ink, RUN on a strip of hazard tape.
+  // The logo, set on paper: CRASH in ink, TEST on a strip of hazard tape.
   logo(ctx, x, y, size) {
-    text(ctx, 'DUMMY', x + 4, y + size * 0.5 + 5, size, { family: F.display, weight: 400, color: C.accent, baseline: 'middle' });
-    text(ctx, 'DUMMY', x, y + size * 0.5, size, { family: F.display, weight: 400, color: C.formInk, baseline: 'middle' });
-    const rw = measure(ctx, 'RUN', size, F.display, 400);
+    text(ctx, 'CRASH', x + 4, y + size * 0.5 + 5, size, { family: F.display, weight: 400, color: C.accent, baseline: 'middle' });
+    text(ctx, 'CRASH', x, y + size * 0.5, size, { family: F.display, weight: 400, color: C.formInk, baseline: 'middle' });
+    const rw = measure(ctx, 'TEST', size, F.display, 400);
     const ty = y + size * 1.02;
     const th = size * 0.86;
     ctx.fillStyle = C.ctYellow;
     ctx.fillRect(x - 6, ty, rw + 22, th);
     hazard(ctx, x - 6, ty, rw + 22, 5, 6);
     hazard(ctx, x - 6, ty + th - 5, rw + 22, 5, 6);
-    text(ctx, 'RUN', x + 5, y + size * 1.47, size, { family: F.display, weight: 400, color: C.formInk, baseline: 'middle' });
+    text(ctx, 'TEST', x + 5, y + size * 1.47, size, { family: F.display, weight: 400, color: C.formInk, baseline: 'middle' });
     target(ctx, x + rw + 22 + size * 0.5, ty + th / 2, size * 0.36);
     return size * 1.95;
   }
@@ -344,7 +344,7 @@ export class TitleOverlay extends Overlay {
   // The cover sheet of the test program. Returns its height.
   cover(ctx, x, y, w, h, { logoSize, pitch, controls }) {
     const play = this.play;
-    report(ctx, x, y, w, h, 'CRASH TEST PROGRAM', { kicker: `DUMMY RUN TEST FACILITY  ·  ${TODAY}`, form: 'FORM DR-1 · TEST PROGRAM COVER' });
+    report(ctx, x, y, w, h, 'TEST PROGRAM', { kicker: `CRASH TEST FACILITY  ·  ${TODAY}`, form: 'FORM CT-1 · TEST PROGRAM COVER' });
     const lx = x + 20;
     const inner = w - 40;
     let cy = y + HEAD + 18;
@@ -495,7 +495,7 @@ export class IntroOverlay extends Overlay {
     const lx = x + 18;
     const rx = x + w - 18;
     const inner = w - 36;
-    report(ctx, x, y, w, h, round.boss ? 'BOSS TEST ORDER' : 'TEST ORDER', { tone: tone.tone, hazardEdge: tone.hazardEdge, kicker: kicker(this.play), form: short ? null : 'FORM DR-3 · PRE-TEST SPECIFICATION' });
+    report(ctx, x, y, w, h, round.boss ? 'BOSS TEST ORDER' : 'TEST ORDER', { tone: tone.tone, hazardEdge: tone.hazardEdge, kicker: kicker(this.play), form: short ? null : 'FORM CT-3 · PRE-TEST SPECIFICATION' });
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
       { label: 'FLOOR', value: `${round.act}-${round.floor}`, flex: 0.8 },
@@ -593,7 +593,7 @@ export class ClearOverlay extends Overlay {
     const rx = x + w - 18;
     const inner = w - 36;
     const perfect = sec.state === 'done';
-    report(ctx, x, y, w, h, 'TEST RESULTS', { tone: C.rate[0], kicker: kicker(play), form: short ? null : 'FORM DR-9 · POST-TEST ASSESSMENT' });
+    report(ctx, x, y, w, h, 'TEST RESULTS', { tone: C.rate[0], kicker: kicker(play), form: short ? null : 'FORM CT-9 · POST-TEST ASSESSMENT' });
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
       { label: 'FLOOR', value: `${round.act}-${round.floor}`, flex: 0.8 },
@@ -903,7 +903,7 @@ export class CardOverlay extends Overlay {
   renderDrops(ctx) {
     this.layoutDrops();
     const card = this.replacing;
-    this.heading(ctx, 'FORM DR-14 · EQUIPMENT DISPOSAL', 'ARSENAL FULL', `You can carry ${MAX_SLOTS} weapons. Drop one to take the ${card.name}.`, C.ctYellow);
+    this.heading(ctx, 'FORM CT-14 · EQUIPMENT DISPOSAL', 'ARSENAL FULL', `You can carry ${MAX_SLOTS} weapons. Drop one to take the ${card.name}.`, C.ctYellow);
     const run = this.play.run;
     this.dropButtons.forEach((b, i) => {
       ctx.fillStyle = b.hover ? '#fffaf0' : C.paper;
@@ -933,7 +933,7 @@ export class CardOverlay extends Overlay {
     }
     this.layoutCards();
     const keyHint = this.fine ? `  Press 1-${this.offer.length} to pick.` : '';
-    const form = this.bonus ? 'FORM DR-12B · BONUS ALLOCATION' : 'FORM DR-12 · COMPONENT REQUISITION';
+    const form = this.bonus ? 'FORM CT-12B · BONUS ALLOCATION' : 'FORM CT-12 · COMPONENT REQUISITION';
     this.heading(ctx, form, this.title, this.subtitle + keyHint, this.bonus ? C.accent : C.paper);
 
     this.printCards(ctx, a);
@@ -1073,7 +1073,7 @@ export class PauseOverlay extends Overlay {
     const play = this.play;
     const lx = x + 18;
     const inner = w - 36;
-    report(ctx, x, y, w, h, 'TEST SUSPENDED', { tone: C.ctYellow, kicker: kicker(play), form: showCodex ? 'FORM DR-5 · INTERRUPTION NOTICE' : null, reserve: 48 });
+    report(ctx, x, y, w, h, 'TEST SUSPENDED', { tone: C.ctYellow, kicker: kicker(play), form: showCodex ? 'FORM CT-5 · INTERRUPTION NOTICE' : null, reserve: 48 });
     Object.assign(this.gearBtn, { x: x + w - 18 - 36, y: y + 14 });
     gearButton(ctx, this.gearBtn);
     let cy = y + HEAD + 12;
@@ -1173,7 +1173,7 @@ export class RouteOverlay extends Overlay {
     const boss = this.route[0].type === 'boss';
     const keyHint = this.fine && !boss ? '  Press 1-3.' : '';
     const sub = `Act ${run.act} · ${run.actDef.name} · floor ${run.floor} of ${FLOORS_PER_ACT}${run.loop ? ` · endless ${run.loop}` : ''}${keyHint}`;
-    this.heading(ctx, 'FORM DR-4 · TEST SCHEDULE · RUN SAVED', boss ? 'BOSS TEST' : 'SCHEDULE THE NEXT TEST', sub, boss ? C.bad : C.paper);
+    this.heading(ctx, 'FORM CT-4 · TEST SCHEDULE · RUN SAVED', boss ? 'BOSS TEST' : 'SCHEDULE THE NEXT TEST', sub, boss ? C.bad : C.paper);
     this.tickets.forEach((t, i) => {
       const k = easeOutBack((this.t - i * 0.07) / 0.3);
       if (k <= 0) return;
@@ -1447,7 +1447,7 @@ export class GameOverOverlay extends Overlay {
     const rx = x + w - 18;
     const inner = w - 36;
     const fav = Object.entries(run.weaponDamage).sort((p, q) => q[1] - p[1])[0]?.[0];
-    report(ctx, x, y, w, h, 'TEST TERMINATED', { tone: C.pen, kicker: kicker(play), form: short ? null : 'FORM DR-10 · FAILURE REPORT' });
+    report(ctx, x, y, w, h, 'TEST TERMINATED', { tone: C.pen, kicker: kicker(play), form: short ? null : 'FORM CT-10 · FAILURE REPORT' });
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
       { label: 'REACHED FLOOR', value: `${play.round.act}-${play.round.floor}`, flex: 0.9 },
@@ -1502,7 +1502,7 @@ export class VictoryOverlay extends Overlay {
     const rx = x + w - 18;
     const inner = w - 36;
     const fav = Object.entries(run.weaponDamage).sort((p, q) => q[1] - p[1])[0]?.[0];
-    report(ctx, x, y, w, h, 'SERIES CERTIFICATION', { tone: C.rate[0], kicker: kicker(this.play), form: short ? null : 'FORM DR-11 · CERTIFICATE OF DESTRUCTION' });
+    report(ctx, x, y, w, h, 'SERIES CERTIFICATION', { tone: C.rate[0], kicker: kicker(this.play), form: short ? null : 'FORM CT-11 · CERTIFICATE OF DESTRUCTION' });
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
       { label: 'SERIES', value: `${ACTS.length}/${ACTS.length} ACTS`, flex: 0.9 },
@@ -1653,7 +1653,7 @@ export class PlaceOverlay extends Overlay {
     ctx.fillRect(L.arena.x, top, L.arena.w, 96);
     hazard(ctx, L.arena.x, top, L.arena.w, 6, 8);
     hazard(ctx, L.arena.x, top + 90, L.arena.w, 6, 8);
-    mono(ctx, `FORM DR-6 · INSTALLATION ORDER · ${TODAY}`, cx, top + 23, 10, { weight: 600, color: C.formMuted, align: 'center', maxWidth: R.w - 32 });
+    mono(ctx, `FORM CT-6 · INSTALLATION ORDER · ${TODAY}`, cx, top + 23, 10, { weight: 600, color: C.formMuted, align: 'center', maxWidth: R.w - 32 });
     const title = `INSTALL: ${this.def.name.toUpperCase()}`;
     const size = clamp(R.w * 0.04, 20, 28);
     const tw = Math.min(measure(ctx, title, size, F.body, 700, 2), R.w - 110);
@@ -1708,7 +1708,7 @@ export class SettingsOverlay extends Overlay {
     const lx = x + 18;
     const rx = x + w - 18;
     const inner = w - 36;
-    report(ctx, x, y, w, h, 'FACILITY SETTINGS', { kicker: `DUMMY RUN TEST FACILITY  ·  ${TODAY}`, form: short ? null : 'FORM DR-2 · OPERATING PARAMETERS' });
+    report(ctx, x, y, w, h, 'FACILITY SETTINGS', { kicker: `CRASH TEST FACILITY  ·  ${TODAY}`, form: short ? null : 'FORM CT-2 · OPERATING PARAMETERS' });
     let cy = y + HEAD + 8;
     this.buttons = [];
     this.rows.forEach((r, i) => {

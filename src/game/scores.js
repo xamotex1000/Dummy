@@ -3,7 +3,7 @@
 
 import { WEAPONS } from './weapons.js';
 
-const KEY = 'dummy-run-scores';
+const KEY = 'crash-test-scores';
 const MAX = 10;
 
 export function runScore(run) {

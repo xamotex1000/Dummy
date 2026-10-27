@@ -33,7 +33,7 @@ export class ScoresOverlay extends Overlay {
     const lx = x + 18;
     const inner = w - 36;
     const list = topScores();
-    report(ctx, x, y, w, h, 'TEST RECORDS', { tone: C.ctYellow, kicker: `HALL OF RECORDS  ·  ${TODAY}`, form: short ? null : 'FORM DR-20 · TEST RECORDS' });
+    report(ctx, x, y, w, h, 'TEST RECORDS', { tone: C.ctYellow, kicker: `HALL OF RECORDS  ·  ${TODAY}`, form: short ? null : 'FORM CT-20 · TEST RECORDS' });
     let cy = y + HEAD + 12;
     if (!short) {
       fields(ctx, lx, cy, inner, [

@@ -1,4 +1,4 @@
-# Dummy Run
+# Crash Test
 
 A proof-of-concept roguelike inspired by *Kick the Buddy*. Over a run you bolt a machine of traps into the cell (springs, spinners, saws, fans, tesla coils, crushers), then feed the dummy into it. You fight through three acts, pick your route between floors, draft weapons, traps and mods, and chain fire, ice, shocks, nails and blasts into reactions.
 
@@ -261,4 +261,4 @@ How the main pieces fit together:
   - a card: `STATIC_CARDS`
   - a reaction: `REACTIONS`, plus the trigger in `statuses.js`
 
-In the browser console, `window.dummyRun` exposes `{ engine, play }` for poking at state.
+In the browser console, `window.crashTest` exposes `{ engine, play }` for poking at state.

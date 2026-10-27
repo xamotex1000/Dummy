@@ -110,8 +110,8 @@ export class PlayScene {
     this.awaitingEntry = false; // the clock waits until the first dummy is in
     this.machine = []; // live trap instances built from run.traps
     this.chain = new Map(); // damage source -> last time it landed a hit
-    this.bestDepth = load('dummy-run-best');
-    this.wins = load('dummy-run-wins');
+    this.bestDepth = load('crash-test-best');
+    this.wins = load('crash-test-wins');
     this.layout = computeLayout(engine.width, engine.height);
     // The pointer in world units, refreshed every tick.
     this.ptr = { x: 0, y: 0, lastX: 0, lastY: 0, vx: 0, vy: 0, speed: 0 };
@@ -334,7 +334,7 @@ export class PlayScene {
     if (round.secondary.state === 'done') this.run.totals.bonuses++;
     if (round.number > this.bestDepth) {
       this.bestDepth = round.number;
-      save('dummy-run-best', this.bestDepth);
+      save('crash-test-best', this.bestDepth);
     }
     this.stamp = { text: 'CLEARED', t: 0, color: C.good };
     this.sfx.clear();
@@ -361,7 +361,7 @@ export class PlayScene {
       if (round.boss && run.act === ACTS.length && !run.endless) {
         run.won = true;
         this.wins++;
-        save('dummy-run-wins', this.wins);
+        save('crash-test-wins', this.wins);
         this.endRun();
         this.engine.push(new VictoryOverlay(this));
         return;
