@@ -1,5 +1,5 @@
-// Palette and type. The look: a padded test cell, a burlap dummy, and a
-// crash test report for the UI: form fields, typed values, yellow-and-black
+// Palette and type. The look: a padded test cell, a yellow crash test dummy,
+// and a crash test report for the UI: form fields, typed values, yellow-and-black
 // calibration targets and injury ratings.
 
 import { hexToRgb } from '../engine/math.js';
@@ -18,14 +18,17 @@ export const C = {
   tuft: '#8b9680',
   mat: '#3b4640',
   matEdge: '#56635b',
-  burlap: '#c99b5e',
-  burlapBoss: '#9a6f43',
-  seam: '#4a3119',
-  stitch: '#5d3e1f',
-  button: '#26221f',
+  // The dummy: yellow vinyl over a jointed metal frame.
+  dummy: '#efbd2a',
+  dummyBoss: '#e3802a',
+  dummyLine: '#2a2620',
+  dummyShade: '#b88c18',
+  joint: '#2d3134',
+  bolt: '#b8bec4',
   bruise: '#8c3040',
   char: '#2a2420',
-  fluff: '#f7f2e7',
+  // Padding foam that flies out of hits.
+  foam: '#f4e6b4',
   blood: '#b3263a',
   accent: '#ff4f86',
   gold: '#ffc63d',
@@ -53,10 +56,10 @@ export const C = {
 };
 
 export const RGB = {
-  burlap: hexToRgb(C.burlap),
-  burlapBoss: hexToRgb(C.burlapBoss),
+  dummy: hexToRgb(C.dummy),
+  dummyBoss: hexToRgb(C.dummyBoss),
   bruise: hexToRgb(C.bruise),
-  // Bruising with gore off: grime instead of blood.
+  // Damage with gore off: scuffs instead of blood.
   grime: hexToRgb('#6b5236'),
   char: hexToRgb(C.char),
   white: [255, 255, 255],

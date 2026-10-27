@@ -350,7 +350,7 @@ export class TitleOverlay extends Overlay {
     let cy = y + HEAD + 18;
     cy += this.logo(ctx, lx, cy, logoSize) + 14;
     fields(ctx, lx, cy, inner, [
-      { label: 'TEST SUBJECT', value: 'BURLAP DUMMY', flex: 1.5 },
+      { label: 'TEST SUBJECT', value: 'CRASH DUMMY', flex: 1.5 },
       { label: 'PERCENTILE', value: '50TH', flex: 0.9 },
       { label: 'STATUS', value: 'READY', color: C.rate[0], flex: 0.9 },
     ]);
@@ -1676,7 +1676,7 @@ export class SettingsOverlay extends Overlay {
     super(play);
     this.blocksUpdate = true;
     this.rows = [
-      { key: 'gore', title: 'Gore', desc: 'Blood splashes, stains the cell and pumps from torn limbs. Off: stuffing only.' },
+      { key: 'gore', title: 'Gore', desc: 'Blood splashes, stains the cell and pumps from torn limbs. Off: foam and plastic chips only.' },
       { key: 'rogueLite', title: 'Rogue-lite mode', desc: 'Runs pay out credits when they end. Spend them on permanent facility upgrades that apply from your next run. Off: every run starts from scratch.' },
     ].map((r) => ({ ...r, x: 0, y: 0, w: 0, h: 0, onClick: () => this.flip(r.key) }));
     this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };

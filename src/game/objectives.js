@@ -31,7 +31,7 @@ export const PRIMARY = {
     return {
       type: 'severs', target,
       label: target === 1 ? 'Tear off a limb' : `Tear off ${target} limbs`,
-      hint: 'Focus one arm or leg until the stitching gives.',
+      hint: 'Focus one arm or leg until the joint gives.',
     };
   },
   bigHit(r) {

@@ -19,6 +19,8 @@ It's designed desktop-first and adapts down to phones:
 - **Phone, portrait:** a top strip with the test order, and a weapon rack along the bottom.
 - **Phone, landscape:** a two-row strip, and the arena zooms in so the dummy stays readable.
 
+The dummies are crash test dummies: yellow vinyl over a jointed frame, with hinge joints, a segmented rubber neck and calibration targets on the temple, chest and thighs. Hits knock out padding foam and chips of vinyl, torn-off limbs leave an empty socket with the wires hanging out, and a destroyed dummy sheds its bolts.
+
 Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) a cardiac monitor and a chart-recorder trace of your damage over the round. Results, run-end sheets and card picks come out of a test recorder at the bottom of the screen. They feed up a line at a time and tear off with a ragged edge; press any key or tap to hurry the printer.
 
 The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
@@ -37,7 +39,7 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 
 The gear on the pause sheet (or the title screen, or the S key) opens the facility settings. Both settings are saved in the browser.
 
-- **Gore** (on by default). Hits splash blood that pools on the floor, splats on the back wall and runs down the walls. Torn limbs pump from both ends, and destroyed dummies burst. Stains last for the round. Off swaps all of it for stuffing, and bruises turn to grime.
+- **Gore** (on by default). Hits splash blood that pools on the floor, splats on the back wall and runs down the walls. Torn limbs pump from both ends, and destroyed dummies burst. Stains last for the round. Off swaps all of it for foam and plastic chips, and damage shows as scuffs.
 - **Rogue-lite mode** (off by default). Off, it's a straight roguelike: every run starts from scratch. On, every run that ends pays out credits: 10 per floor cleared, 5 per secondary met, 2 per reaction, and 100 for finishing the series. You spend them on the progression tree (below).
 
 ## The progression tree
@@ -83,16 +85,16 @@ Sheets fit themselves to the screen: each one measures its layouts and uses the 
   - **Crate:** a random twist (Zero-G, Glass Dummies, Swarm, Blackout); reward is a new weapon.
   - **Workshop:** no fight; upgrade one weapon. Once per act.
 - **Dummy variants.** Different ones reward different weapons:
-  - **Runts:** small, and come in pairs.
+  - **Child Dummies:** child-size, and come in pairs.
   - **Rubber Dummy:** takes a quarter of impact damage.
   - **Riot Dummy:** helmet and vest soak 60% until broken.
   - **Balloon Dummy:** floats until you pop its head.
   - **Asbestos Dummy:** fireproof, but shatters easily.
-  - **Self-Stitcher:** heals unless bleeding.
+  - **Auto-Repair Dummy:** repairs itself unless bleeding.
 - **Bosses.**
-  - **Big Buddy:** 4.5x health.
+  - **Heavyweight:** the 95th-percentile model, 4.5x health.
   - **Riot Captain:** huge and armored.
-  - **Hydra King:** splits into two Hydra Spawn, which each split into two Runts.
+  - **Hydra King:** splits into two Hydra Spawn, which each split into two Child Dummies.
 - **Objectives.** Each floor has a primary objective and a timer (40s, 60s for bosses):
   - deal X damage
   - destroy X dummies
@@ -210,7 +212,7 @@ src/
     rng.js           seeded RNG (mulberry32) with weighted sampling
     math.js          segment distance, easing, color mixing
   game/
-    dummy.js         15-point ragdoll, variants (armor, balloon, regen...), hit tests, severing
+    dummy.js         15-point ragdoll drawn as a crash test dummy, variants (armor, balloon, regen...), hit tests, severing
     variants.js      dummy variants, the three acts, crate twists
     statuses.js      bleed / burn / freeze / shock / nails, and the reactions between them
     reactions.js     reaction list, codex discovery storage

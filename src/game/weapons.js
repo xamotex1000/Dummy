@@ -108,7 +108,7 @@ function pistolShot(sc) {
   }
   sc.push(best, m.ux * 900, m.uy * 900 - 150);
   sc.dealDamage(best.dummy, best.seg, sc.level('pistol') >= 2 ? 18 : 11, 'pistol', { x: best.x, y: best.y });
-  sc.fxFluff(best.x, best.y, 6, 1);
+  sc.fxFoam(best.x, best.y, 6, 1);
   sc.fxSparks(best.x, best.y, 6, C.gold);
 }
 
@@ -319,8 +319,8 @@ export const WEAPONS = {
         sc.push(hit, dir.x * force, dir.y * force);
         sc.dealDamage(hit.dummy, hit.seg, dmg, 'knife', { x: hit.x, y: hit.y, limbMult: sc.level('knife') >= 3 ? 2 : 1 });
         sc.addBleed(hit.dummy, hit.seg, 3.5, sc.level('knife') >= 2 ? 6 : 3, 'knife');
-        sc.fxFluff(hit.x, hit.y, 3, 0.6);
-        sc.fxSparks(hit.x, hit.y, 3, sc.gore.on ? C.blood : C.fluff);
+        sc.fxFoam(hit.x, hit.y, 3, 0.6);
+        sc.fxSparks(hit.x, hit.y, 3, sc.gore.on ? C.blood : C.foam);
         sc.sfx.slash();
       });
     },
@@ -451,7 +451,7 @@ export const WEAPONS = {
         if (!sc.ready('saw' + d.id, 0.1)) continue;
         sc.dealDamage(d, hit.seg, 3.6 * (over ? 1.6 : 1), 'chainsaw', { kind: 'grind', x: hit.x, y: hit.y, limbMult: sc.level('chainsaw') >= 2 ? 2 : 1 });
         sc.addBleed(d, hit.seg, 2, 3, 'chainsaw');
-        sc.fxFluff(hit.x, hit.y, 2, 0.8);
+        sc.fxFoam(hit.x, hit.y, 2, 0.8);
       }
     },
   },
