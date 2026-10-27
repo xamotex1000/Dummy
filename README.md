@@ -19,7 +19,7 @@ It's designed desktop-first and adapts down to phones:
 - **Phone, portrait:** a top strip with the test order, and a weapon rack along the bottom.
 - **Phone, landscape:** a two-row strip, and the arena zooms in so the dummy stays readable.
 
-Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) and a chart-recorder trace of your damage over the round.
+Every menu is a crash test report. Test orders come on spec sheets, cards are component sheets with an exhibit photo and a class rating, and each cleared floor files a results sheet. That sheet has an injury assessment that rates each body region G/A/M/P (on this test, P is the goal) and a chart-recorder trace of your damage over the round. Results, run-end sheets and card picks come out of a test recorder at the bottom of the screen. They feed up a line at a time and tear off with a ragged edge; press any key or tap to hurry the printer.
 
 The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
 
