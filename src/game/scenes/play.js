@@ -20,7 +20,9 @@ import { Entrance } from '../entrances.js';
 import { Gore } from '../gore.js';
 import { Heart, newHeartRecord } from '../heart.js';
 import { settings } from '../settings.js';
-import { applyUpgrades, payRun } from '../meta.js';
+import { applyTree, payRun } from '../meta.js';
+import { saveRun, loadRun, clearRun } from '../save.js';
+import { recordScore, runScore } from '../scores.js';
 import { TRAPS, createTrap, mountById } from '../traps.js';
 import {
   spawnGrenade, spawnAnvil, spawnVortex, updateProjectiles, drawProjectile,
@@ -188,38 +190,58 @@ export class PlayScene {
     this.engine.push(new TitleOverlay(this));
   }
 
+  // Picks up a saved run where it was saved: the act screen or the route.
+  continueRun() {
+    const data = loadRun();
+    if (!data) return this.newRun();
+    const run = Object.assign(new Run(data.run.seed), data.run);
+    this.run = run;
+    this.rng = new RNG((run.seed ^ Math.imul(run.depth, 7919) ^ data.savedAt) >>> 0);
+    this.round = null;
+    this.weaponId = 'hands';
+    this.hud.layout();
+    this.rebuildMachine();
+    if (data.at === 'act') this.showAct();
+    else {
+      this.setTheme(run.actDef.theme);
+      this.world.gravity = GRAVITY * run.actDef.gravity;
+      this.showRoute();
+    }
+  }
+
   newRun() {
+    clearRun();
     const seed = (Date.now() ^ (Math.random() * 1e9)) >>> 0;
     this.run = new Run(seed);
     this.rng = new RNG(seed);
     const run = this.run;
-    if (settings.rogueLite) applyUpgrades(run);
+    if (settings.rogueLite) applyTree(run);
     this.round = null;
     this.state = 'between';
     this.weaponId = 'hands';
     this.hud.layout();
-    this.engine.push(new CardOverlay(this, {
-      offer: starterOffer(this.rng),
-      title: 'CHOOSE YOUR TOOL',
-      subtitle: 'Pick the weapon you start with. Your hands are always free.',
-      rerolls: false,
-      onDone: () => {
-        if (run.toolkit) for (const id of run.owned) if (id !== 'hands') run.weapons[id].level = 2;
-        this.engine.push(new CardOverlay(this, {
-          offer: starterTrapOffer(this.rng),
-          title: 'INSTALL YOUR FIRST TRAP',
-          subtitle: 'Traps run on their own. You will place it on the next screen.',
-          rerolls: false,
-          onDone: () => {
-            if (run.prewired) {
-              for (const t of run.traps) run.trapLevels[t.id] = Math.max(2, run.trapLevel(t.id));
-              this.rebuildMachine();
-            }
-            this.showAct();
-          },
-        }));
-      },
-    }));
+    // Starting picks: a weapon and a trap, or two of each with the tree.
+    const steps = [];
+    const weaponPick = (title, subtitle) => (next) => new CardOverlay(this, {
+      offer: starterOffer(this.rng).filter((c) => !run.weapons[c.icon]),
+      title, subtitle, rerolls: false, onDone: next,
+    });
+    const trapPick = (title, subtitle) => (next) => new CardOverlay(this, {
+      offer: starterTrapOffer(this.rng).filter((c) => !run.trapLevel(c.trap)),
+      title, subtitle, rerolls: false, onDone: next,
+    });
+    steps.push(weaponPick('CHOOSE YOUR TOOL', 'Pick the weapon you start with. Your hands are always free.'));
+    if (run.extraStarter) steps.push(weaponPick('SPARE HOLSTER', 'Your facility upgrades allow a second starting weapon.'));
+    steps.push(trapPick('INSTALL YOUR FIRST TRAP', 'Traps run on their own. You will place it on the next screen.'));
+    if (run.extraTrap) steps.push(trapPick('SECOND INSTALL', 'Your facility upgrades allow a second starting trap.'));
+    const finish = () => {
+      for (const id of run.owned) if (id !== 'hands') run.weapons[id].level = Math.max(run.weapons[id].level, run.startLevel);
+      if (run.prewired && run.traps[0]) run.trapLevels[run.traps[0].id] += 1;
+      this.rebuildMachine();
+      this.showAct();
+    };
+    const runSteps = (i) => (i < steps.length ? this.engine.push(steps[i](() => runSteps(i + 1))) : finish());
+    runSteps(0);
   }
 
   rebuildMachine() {
@@ -241,10 +263,11 @@ export class PlayScene {
   }
 
   chainBonus() {
-    return Math.max(0, this.chainCount - 1) * CHAIN_STEP;
+    return Math.max(0, this.chainCount - 1) * (CHAIN_STEP + (this.run?.chainStep ?? 0));
   }
 
   showAct() {
+    saveRun(this.run, 'act');
     this.state = 'between';
     this.setTheme(this.run.actDef.theme);
     this.world.gravity = GRAVITY * this.run.actDef.gravity;
@@ -252,6 +275,7 @@ export class PlayScene {
   }
 
   showRoute() {
+    saveRun(this.run, 'route');
     this.state = 'between';
     const route = makeRoute(this.run, this.rng);
     this.engine.push(new RouteOverlay(this, route, (node) => this.chooseNode(node)));
@@ -333,11 +357,12 @@ export class PlayScene {
         return;
       }
       const run = this.run;
+      if (round.boss) run.rerolls += run.bossRerolls;
       if (round.boss && run.act === ACTS.length && !run.endless) {
         run.won = true;
         this.wins++;
         save('dummy-run-wins', this.wins);
-        this.payout();
+        this.endRun();
         this.engine.push(new VictoryOverlay(this));
         return;
       }
@@ -364,15 +389,20 @@ export class PlayScene {
     this.later(1.1, () => {
       if (this.run.lives > 0) this.engine.push(new SecondWindOverlay(this));
       else {
-        this.payout();
+        this.endRun();
+        clearRun();
         this.engine.push(new GameOverOverlay(this));
       }
     });
   }
 
-  // Rogue-lite: the run's credits go into the facility budget.
-  payout() {
-    this.run.payout = settings.rogueLite ? payRun(this.run) : 0;
+  // The run ends (or is won): rogue-lite credits go into the facility
+  // budget, and the run goes on the high score table.
+  endRun() {
+    const run = this.run;
+    run.payout = settings.rogueLite ? payRun(run) : 0;
+    run.score = runScore(run);
+    run.rank = recordScore(run, settings.rogueLite ? 'ROGUE-LITE' : 'ROGUELIKE');
   }
 
   // Same ticket, freshly rolled.
@@ -617,7 +647,8 @@ export class PlayScene {
     }
     if (dummy.shockT > 0 && this.level('taser') >= 3) amt *= 1.25;
     if (run && !env) {
-      amt *= run.dmgMult;
+      amt *= run.dmgMult * (trap ? run.trapMult : run.weaponMult);
+      if (run.overclock && this.timeLeft > this.round.time / 2) amt *= 1.2;
       if (seg.group === 'head') amt *= run.headMult;
       if (kind === 'impact') amt *= run.impactMult;
       if (!sustained && this.rng.chance(run.critChance)) {

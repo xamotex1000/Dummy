@@ -1,12 +1,10 @@
 // Overlay scenes drawn on top of the arena. Every menu is a crash test
-// report: a masthead with a calibration target, numbered sections, form
-// fields with typed values, injury ratings and an inspector's stamp.
-//
-// Overlays center on `layout.frame`: the arena on desktop (so the sidebar
-// stays readable), the whole screen on phones.
+// report (see sheet.js for the paper): a masthead with a calibration target,
+// numbered sections, form fields with typed values, injury ratings and an
+// inspector's stamp.
 
 import { roundRectPath, capsulePath, wrapText } from '../../engine/renderer.js';
-import { clamp, lerp, easeOutCubic, easeOutBack } from '../../engine/math.js';
+import { clamp, easeOutCubic, easeOutBack } from '../../engine/math.js';
 import { drawWeaponIcon, drawTarget as target } from '../icons.js';
 import { WEAPONS, MAX_SLOTS } from '../weapons.js';
 import { drawOffer, takeCard, KIND_LABEL } from '../cards.js';
@@ -15,258 +13,18 @@ import { VARIANTS, ACTS, TWISTS, FLOORS_PER_ACT } from '../variants.js';
 import { REACTIONS, REACTION_IDS } from '../reactions.js';
 import { TRAPS, mountPoints, createTrap, drawTrapIcon, SURFACE_LABEL } from '../traps.js';
 import { settings, setSetting } from '../settings.js';
-import { meta, UPGRADES, upgradeLevel, upgradeCost, buyUpgrade } from '../meta.js';
+import { meta } from '../meta.js';
+import { loadRun } from '../save.js';
+import { topScores } from '../scores.js';
+import { TreeOverlay } from './tree-overlay.js';
+import { ScoresOverlay } from './records.js';
 import { C, F, font } from '../theme.js';
+import {
+  TAU, HEAD, FOOT, TODAY, shadows, text, mono, caption, measure, paragraph, dim, keyW, keycap, hazard, rule, report, fields, section, checkbox, gearButton, toggle, verdict, stampMark, hit, pulse, floorName, kicker, Printer, drawTorn, Overlay, setShadows,
+} from './sheet.js';
 
-// ---------------------------------------------------------------- helpers
-
-const TAU = Math.PI * 2;
-// Masthead height of a report sheet, and the strip a footer needs.
-const HEAD = 58;
-const FOOT = 22;
 // Results charts are sampled every quarter second.
 const TRACE_STEP = 0.25;
-const TODAY = new Date().toISOString().slice(0, 10);
-// Torn printouts draw their own jagged shadow, so sheets skip theirs.
-let shadows = true;
-
-function setSpacing(ctx, px) {
-  if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`;
-}
-
-function text(ctx, s, x, y, size, { family = F.body, weight = 600, color = C.formInk, align = 'left', baseline = 'alphabetic', spacing = 0, maxWidth } = {}) {
-  ctx.font = font(size, family, weight);
-  ctx.fillStyle = color;
-  ctx.textAlign = align;
-  ctx.textBaseline = baseline;
-  setSpacing(ctx, spacing);
-  if (maxWidth) ctx.fillText(s, x, y, maxWidth);
-  else ctx.fillText(s, x, y);
-  setSpacing(ctx, 0);
-}
-
-// Typed values: report numbers, measurements, keys.
-const mono = (ctx, s, x, y, size, opts = {}) => text(ctx, s, x, y, size, { family: F.mono, weight: 500, ...opts });
-
-// The tiny uppercase caption on a form field.
-const caption = (ctx, s, x, y, opts = {}) => text(ctx, s, x, y, 10, { weight: 700, color: C.formMuted, spacing: 1.2, ...opts });
-
-function measure(ctx, s, size, family = F.body, weight = 600, spacing = 0) {
-  ctx.font = font(size, family, weight);
-  setSpacing(ctx, spacing);
-  const w = ctx.measureText(s).width;
-  setSpacing(ctx, 0);
-  return w;
-}
-
-function paragraph(ctx, s, x, y, width, size, lineH, opts = {}) {
-  ctx.font = font(size, opts.family ?? F.body, opts.weight ?? 500);
-  let lines = wrapText(ctx, s, width);
-  if (opts.maxLines) lines = lines.slice(0, Math.max(0, opts.maxLines));
-  lines.forEach((ln, i) => text(ctx, ln, x, y + i * lineH, size, { weight: 500, ...opts }));
-  return lines.length * lineH;
-}
-
-function dim(ctx, r, a) {
-  ctx.fillStyle = `rgba(14,17,13,${Math.min(0.92, 0.64 * a)})`;
-  ctx.fillRect(r.x, r.y, r.w, r.h);
-}
-
-const keyW = (ctx, label) => Math.max(20, measure(ctx, label, 11, F.mono, 600) + 10);
-
-function keycap(ctx, label, x, y, { dark = false } = {}) {
-  const w = keyW(ctx, label);
-  ctx.fillStyle = dark ? C.inkSoft : C.paper;
-  ctx.fillRect(x, y - 10, w, 20);
-  ctx.strokeStyle = dark ? C.inkLine : C.formInk;
-  ctx.lineWidth = 1.25;
-  ctx.strokeRect(x + 0.5, y - 9.5, w - 1, 19);
-  mono(ctx, label, x + w / 2, y + 1, 11, { weight: 600, color: dark ? C.paperDim : C.formInk, align: 'center', baseline: 'middle' });
-  return w;
-}
-
-function hazard(ctx, x, y, w, h, step = 12) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x, y, w, h);
-  ctx.clip();
-  ctx.fillStyle = C.ctYellow;
-  ctx.fillRect(x, y, w, h);
-  ctx.fillStyle = C.formInk;
-  for (let sx = x - h; sx < x + w + h; sx += step * 2) {
-    ctx.beginPath();
-    ctx.moveTo(sx, y + h);
-    ctx.lineTo(sx + h, y);
-    ctx.lineTo(sx + h + step, y);
-    ctx.lineTo(sx + step, y + h);
-    ctx.fill();
-  }
-  ctx.restore();
-}
-
-function rule(ctx, x0, x1, y, color = C.rule) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x0, Math.round(y), x1 - x0, 1);
-}
-
-// A report sheet: paper, a colored edge for the test class, and a masthead
-// with the calibration target, the facility line and the form title.
-function report(ctx, x, y, w, h, title, { tone = C.formInk, hazardEdge = false, kicker = 'DUMMY RUN TEST FACILITY', form = null, compact = false, reserve = 0 } = {}) {
-  if (shadows) {
-    ctx.fillStyle = 'rgba(0,0,0,0.34)';
-    ctx.fillRect(x + 5, y + 8, w, h);
-  }
-  ctx.fillStyle = C.paper;
-  ctx.fillRect(x, y, w, h);
-  if (hazardEdge) hazard(ctx, x, y, w, 7, 9);
-  else {
-    ctx.fillStyle = tone;
-    ctx.fillRect(x, y, w, 7);
-  }
-  const head = compact ? 40 : HEAD;
-  if (compact) {
-    target(ctx, x + 19, y + 23, 9);
-    text(ctx, title, x + 36, y + 29, 15, { weight: 700, spacing: 1.2, maxWidth: w - 52 - reserve });
-  } else {
-    target(ctx, x + 26, y + 33, 13);
-    mono(ctx, kicker, x + 48, y + 25, 10, { color: C.formMuted, maxWidth: w - 64 });
-    text(ctx, title, x + 48, y + 46, 19, { weight: 700, spacing: 1.4, maxWidth: w - 64 - reserve });
-  }
-  ctx.fillStyle = C.formInk;
-  ctx.fillRect(x + 12, y + head - 4, w - 24, 2);
-  ctx.fillRect(x + 12, y + head - 0.5, w - 24, 1);
-  if (form) {
-    rule(ctx, x + 12, x + w - 12, y + h - FOOT + 2);
-    mono(ctx, form, x + 14, y + h - 8, 9, { color: C.formMuted });
-    mono(ctx, `PAGE 1 OF 1`, x + w - 14, y + h - 8, 9, { color: C.formMuted, align: 'right' });
-  }
-}
-
-// A row of boxed form fields: caption on top, typed value below.
-function fields(ctx, x, y, w, items, h = 40) {
-  const total = items.reduce((n, it) => n + (it.flex ?? 1), 0);
-  ctx.strokeStyle = C.formInk;
-  ctx.lineWidth = 1.25;
-  ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
-  let cx = x;
-  items.forEach((it, i) => {
-    const cw = (w * (it.flex ?? 1)) / total;
-    if (i) {
-      ctx.fillStyle = C.formInk;
-      ctx.fillRect(Math.round(cx), y, 1.25, h);
-    }
-    caption(ctx, it.label, cx + 7, y + 13, { maxWidth: cw - 12 });
-    mono(ctx, it.value, cx + 7, y + h - 9, it.size ?? 15, { weight: 600, color: it.color ?? C.formInk, maxWidth: cw - 13 });
-    cx += cw;
-  });
-  return h;
-}
-
-// A numbered section heading with a rule running out to the margin.
-function section(ctx, x, y, w, num, title, { color = C.formInk, right = null, rightColor = C.formMuted } = {}) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y - 12, 16, 16);
-  mono(ctx, String(num), x + 8, y - 3.5, 11, { weight: 700, color: C.paper, align: 'center', baseline: 'middle' });
-  text(ctx, title, x + 24, y, 12, { weight: 700, color, spacing: 1.4 });
-  let end = x + w;
-  if (right) {
-    mono(ctx, right, end, y, 11, { weight: 600, color: rightColor, align: 'right' });
-    end -= measure(ctx, right, 11, F.mono, 600) + 8;
-  }
-  const start = x + 24 + measure(ctx, title, 12, F.body, 700, 1.4) + 8;
-  if (end > start) rule(ctx, start, end, y - 4);
-}
-
-function checkbox(ctx, x, y, state) {
-  ctx.lineWidth = 1.5;
-  ctx.strokeStyle = C.formInk;
-  ctx.strokeRect(x + 0.5, y + 0.5, 16, 16);
-  ctx.lineCap = 'round';
-  if (state === 'done') {
-    ctx.strokeStyle = '#2f7d43';
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.moveTo(x + 3, y + 8);
-    ctx.lineTo(x + 8, y + 14);
-    ctx.lineTo(x + 19, y - 3);
-    ctx.stroke();
-  } else if (state === 'failed') {
-    ctx.strokeStyle = C.pen;
-    ctx.lineWidth = 3.5;
-    ctx.beginPath();
-    ctx.moveTo(x + 3, y + 3);
-    ctx.lineTo(x + 14, y + 14);
-    ctx.moveTo(x + 14, y + 3);
-    ctx.lineTo(x + 3, y + 14);
-    ctx.stroke();
-  }
-  ctx.lineCap = 'butt';
-}
-
-// A settings gear, with its hole punched in `bg`.
-function gear(ctx, x, y, r, color, bg) {
-  const teeth = 8;
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  for (let i = 0; i < teeth * 2; i++) ctx.arc(x, y, i % 2 ? r * 0.74 : r, (i / (teeth * 2)) * TAU, ((i + 1) / (teeth * 2)) * TAU);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = bg;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 0.32, 0, TAU);
-  ctx.fill();
-}
-
-// A gear button: on paper, or dark on the backdrop.
-function gearButton(ctx, b, { dark = false } = {}) {
-  const bg = dark ? (b.hover ? C.inkLine : C.inkSoft) : b.hover ? C.ruleSoft : C.paper;
-  ctx.fillStyle = bg;
-  ctx.fillRect(b.x, b.y, b.w, b.h);
-  ctx.strokeStyle = dark ? C.paperDim : C.formInk;
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5);
-  gear(ctx, b.x + b.w / 2, b.y + b.h / 2, b.h * 0.3, dark ? C.paper : C.formInk, bg);
-}
-
-// An OFF | ON switch, 96 x 28, with the live side filled.
-function toggle(ctx, x, y, on) {
-  const w = 96, h = 28;
-  ctx.fillStyle = on ? '#2f7d43' : C.formInk;
-  ctx.fillRect(on ? x + w / 2 : x, y, w / 2, h);
-  ctx.strokeStyle = C.formInk;
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(x + 0.75, y + 0.75, w - 1.5, h - 1.5);
-  mono(ctx, 'OFF', x + w / 4, y + h / 2 + 1, 12, { weight: 700, color: on ? C.formMuted : C.paper, align: 'center', baseline: 'middle' });
-  mono(ctx, 'ON', x + (w * 3) / 4, y + h / 2 + 1, 12, { weight: 700, color: on ? C.paper : C.formMuted, align: 'center', baseline: 'middle' });
-}
-
-// A boxed verdict like PASS or FAIL, right-aligned at rx. Returns its width.
-function verdict(ctx, s, rx, y, color) {
-  const w = measure(ctx, s, 12, F.mono, 700) + 12;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  ctx.strokeRect(rx - w + 0.5, y - 13.5, w - 1, 18);
-  mono(ctx, s, rx - w / 2, y, 12, { weight: 700, color, align: 'center' });
-  return w;
-}
-
-function stampMark(ctx, label, x, y, color, t, size = 22) {
-  const k = t < 0.18 ? 2 - t / 0.18 : 1;
-  ctx.save();
-  ctx.translate(x, y);
-  ctx.rotate(-0.2);
-  ctx.scale(k, k);
-  ctx.globalAlpha *= clamp(t / 0.1, 0, 1) * 0.85;
-  const w = measure(ctx, label, size, F.display, 400) + 26;
-  const h = size * 1.9;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(-w / 2, -h / 2, w, h);
-  ctx.lineWidth = 1.25;
-  ctx.strokeRect(-w / 2 + 4, -h / 2 + 4, w - 8, h - 8);
-  text(ctx, label, 0, 1, size, { family: F.display, weight: 400, color, align: 'center', baseline: 'middle' });
-  ctx.restore();
-}
 
 // Injury ratings: G, A, M, P by share of the worst-hit region.
 const RATE_LETTERS = ['G', 'A', 'M', 'P'];
@@ -489,12 +247,6 @@ function heartStats(rec) {
   };
 }
 
-function hit(b, x, y) {
-  return x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h;
-}
-
-const pulse = (t) => 0.55 + 0.45 * Math.sin(t * 4);
-
 const PITCH = 'Build a machine of traps around a test dummy and set it loose. Pick your route through three acts, draft weapons, traps and mods, and chain fire, ice, shocks, nails and blasts into reactions. Miss a deadline and the run is over.';
 
 // Test classes for route tickets and orders.
@@ -506,391 +258,6 @@ const TYPE_TONE = {
   boss: { tone: C.bad, label: 'BOSS', hazardEdge: true },
 };
 
-const floorName = (depth) => `${Math.floor((depth - 1) / FLOORS_PER_ACT) + 1}-${((depth - 1) % FLOORS_PER_ACT) + 1}`;
-
-function reportNo(play, n = play.round?.number ?? play.run?.depth ?? 0) {
-  const seed = play.run?.seed ?? 0;
-  return `DR-${(seed % 1679616).toString(36).toUpperCase().padStart(4, '0')}-${String(n).padStart(2, '0')}`;
-}
-
-const kicker = (play, n) => `REPORT ${reportNo(play, n)}  ·  ${TODAY}`;
-
-// -------------------------------------------------------------- printer
-
-// Results and card picks come out of a test recorder at the bottom of the
-// frame. It rises, feeds paper up a line at a time, pauses, then each sheet
-// tears off (tipping from its right-hand corner) and lifts free to where it
-// rests while the printer drops away. Sheets tear one after another.
-const FEED_STEP = 5;
-const RISE = 0.22;
-const TEAR = 0.14;
-const LIFT = 0.4;
-
-class Printer {
-  constructor(sfx, { count = 1, stagger = 0.1 } = {}) {
-    this.sfx = sfx;
-    this.count = count;
-    this.stagger = stagger;
-    this.feedTime = 0.9;
-    this.reset();
-  }
-
-  reset() {
-    this.t = 0;
-    this.lastTick = 0;
-    this.ripped = 0;
-  }
-
-  // Paper feeds at a steady rate, so longer sheets take a little longer.
-  setLength(px) {
-    if (this.t < RISE) this.feedTime = clamp(px / 650, 0.55, 1.2);
-  }
-
-  get feedEnd() {
-    return RISE + this.feedTime;
-  }
-
-  tearAt(i) {
-    return this.feedEnd + 0.12 + i * this.stagger;
-  }
-
-  freeAt(i) {
-    return this.tearAt(i) + TEAR;
-  }
-
-  get end() {
-    return this.freeAt(this.count - 1) + LIFT;
-  }
-
-  get locked() {
-    return this.t < this.end;
-  }
-
-  // First press finishes the feed, a second one finishes everything.
-  skip() {
-    this.t = this.t < this.feedEnd ? this.feedEnd : this.end;
-  }
-
-  update(dt) {
-    this.t += dt;
-    if (this.t > RISE && this.t < this.feedEnd && this.t - this.lastTick > 0.075) {
-      this.lastTick = this.t;
-      this.sfx.printFeed();
-    }
-    while (this.ripped < this.count && this.t >= this.tearAt(this.ripped)) {
-      this.ripped++;
-      this.sfx.paperTear();
-    }
-  }
-
-  // How much paper is out of the slot, in whole printed lines.
-  fed(len) {
-    const p = clamp((this.t - RISE) / this.feedTime, 0, 1);
-    return Math.min(len, Math.ceil((p * len) / FEED_STEP) * FEED_STEP);
-  }
-
-  // 0 tucked below the frame, 1 up and printing.
-  get raised() {
-    const down = clamp((this.t - this.freeAt(this.count - 1) - 0.1) / 0.3, 0, 1);
-    return easeOutCubic(this.t / 0.2) * (1 - down * down);
-  }
-
-  // Where sheet i of length `len` sits, given the slot and its resting y.
-  pose(i, restY, len, slotY) {
-    const t = this.t;
-    if (t < this.tearAt(i)) return { y: slotY - this.fed(len), angle: 0, clip: true, torn: false, free: 0 };
-    if (t < this.freeAt(i)) return { y: slotY - len, angle: 0.05 * easeOutCubic((t - this.tearAt(i)) / TEAR), clip: true, torn: true, free: 0 };
-    const k = clamp((t - this.freeAt(i)) / LIFT, 0, 1);
-    return { y: lerp(slotY - len, restY, easeOutCubic(k)), angle: 0.05 * (1 - easeOutBack(k)), clip: false, torn: true, free: k };
-  }
-}
-
-// A ragged tear along the bottom: [x, depth] pairs, stable per seed.
-function tornEdge(w, seed) {
-  let s = (seed * 9301 + 49297) % 233280;
-  const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
-  const pts = [];
-  for (let x = 0; x < w; x += 3 + rnd() * 7) pts.push([x, 1 + rnd() * 4.5]);
-  pts.push([w, 1 + rnd() * 4.5]);
-  return pts;
-}
-
-function tornPath(ctx, x, y, w, h, teeth) {
-  ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + w, y);
-  for (let i = teeth.length - 1; i >= 0; i--) ctx.lineTo(x + teeth[i][0], y + h - teeth[i][1]);
-  ctx.closePath();
-}
-
-// Draws a sheet with a torn bottom edge. Returns what `draw` returns.
-function drawTorn(ctx, x, y, w, h, teeth, draw, shadowDy = 8) {
-  ctx.fillStyle = 'rgba(0,0,0,0.34)';
-  tornPath(ctx, x + 5, y + shadowDy, w, h, teeth);
-  ctx.fill();
-  ctx.save();
-  tornPath(ctx, x, y, w, h, teeth);
-  ctx.clip();
-  shadows = false;
-  const used = draw();
-  shadows = true;
-  ctx.restore();
-  return used;
-}
-
-// ----------------------------------------------------------------- base
-
-class Overlay {
-  constructor(play) {
-    this.play = play;
-    this.t = 0;
-    this.closing = -1;
-    this.buttons = [];
-    this.tapAnywhere = null;
-    this.keys = {};
-    this.heights = {};
-  }
-
-  get L() {
-    return this.play.layout;
-  }
-
-  get frame() {
-    return this.play.layout.frame;
-  }
-
-  get fine() {
-    return this.play.input.finePointer;
-  }
-
-  get appear() {
-    const a = easeOutCubic(this.t / 0.25);
-    return this.closing >= 0 ? a * (1 - clamp(this.closing / 0.18, 0, 1)) : a;
-  }
-
-  close(after) {
-    if (this.closing >= 0) return;
-    this.closing = 0;
-    this.after = after;
-  }
-
-  update(dt, isTop) {
-    this.t += dt;
-    this.printer?.update(dt);
-    if (this.closing >= 0) {
-      this.closing += dt;
-      if (this.closing >= 0.18) {
-        this.play.engine.remove(this);
-        this.after?.();
-      }
-      return;
-    }
-    if (!isTop) return;
-    const input = this.play.input;
-    const p = input.pointer;
-    const hover = p.type === 'mouse' && p.inside ? this.buttons.find((b) => hit(b, p.x, p.y)) : null;
-    for (const b of this.buttons) b.hover = b === hover;
-    this.play.engine.cursor = hover ? 'pointer' : 'default';
-    if (this.t < 0.2) return;
-    // While printing, a key or tap hurries the printer instead.
-    if (this.printer?.locked) {
-      if (input.keysPressed.size || p.released) this.printer.skip();
-      for (const b of this.buttons) b.armed = false;
-      return;
-    }
-    for (const key of input.keysPressed) this.keys[key]?.();
-    if (p.pressed) for (const b of this.buttons) b.armed = hit(b, p.x, p.y);
-    if (p.released) {
-      const b = this.buttons.find((bb) => bb.armed && hit(bb, p.x, p.y));
-      for (const bb of this.buttons) bb.armed = false;
-      if (b) b.onClick();
-      else if (this.tapAnywhere) this.tapAnywhere();
-    }
-  }
-
-  // Primary buttons are ink with a yellow edge (hazard tape on hover).
-  // Secondary ones are outlined, on paper or on the dark backdrop.
-  drawButton(ctx, b, label, { primary = true, key = null, paper = false } = {}) {
-    const y = b.y + (b.armed ? 2 : 0);
-    let fg = C.paper;
-    if (primary) {
-      ctx.fillStyle = b.hover ? '#34302a' : C.formInk;
-      ctx.fillRect(b.x, y, b.w, b.h);
-      if (b.hover) hazard(ctx, b.x, y, 10, b.h, 6);
-      else {
-        ctx.fillStyle = C.ctYellow;
-        ctx.fillRect(b.x, y, 5, b.h);
-      }
-    } else {
-      fg = paper ? C.formInk : C.paper;
-      if (b.hover) {
-        ctx.fillStyle = paper ? C.ruleSoft : 'rgba(239,234,223,0.12)';
-        ctx.fillRect(b.x, y, b.w, b.h);
-      }
-      ctx.strokeStyle = paper ? C.formInk : C.paperDim;
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(b.x + 0.75, y + 0.75, b.w - 1.5, b.h - 1.5);
-    }
-    text(ctx, label, b.x + b.w / 2, y + b.h / 2 + 1, 17, { weight: 700, color: fg, align: 'center', baseline: 'middle', spacing: 2.5, maxWidth: b.w - 24 });
-    if (key && this.fine) keycap(ctx, key, b.x + b.w - keyW(ctx, key) - 12, y + b.h / 2, { dark: primary || !paper });
-  }
-
-  // A vertically centered sheet rectangle inside the frame.
-  ticketRect(w, h, drop = true) {
-    const R = this.frame;
-    w = Math.min(w, R.w - 32);
-    const x = R.x + (R.w - w) / 2;
-    const y = Math.max(R.y + 12, R.y + (R.h - h) / 2) + (drop ? (1 - easeOutBack(this.t / 0.35)) * 60 : 0);
-    return { x, y, w, h };
-  }
-
-  // Draws a sheet whose height comes from its own contents: `draw(x, y, w, h)`
-  // returns the height it used, which sizes the paper on the next frame. The
-  // first frame measures with an invisible pass.
-  sheet(ctx, key, w, draw, drop = true) {
-    w = Math.min(w, this.frame.w - 32);
-    key += `:${Math.round(w)}`;
-    const R = this.ticketRect(w, this.measure(ctx, key, w, draw), drop);
-    this.heights[key] = draw(R.x, R.y, R.w, this.heights[key]);
-    return R;
-  }
-
-  // A sheet layout's height, measured once with an invisible pass.
-  measure(ctx, key, w, draw) {
-    if (this.heights[key] === undefined) {
-      ctx.save();
-      ctx.globalAlpha = 0;
-      this.heights[key] = draw(this.frame.x, this.frame.y, w, 200);
-      ctx.restore();
-    }
-    return this.heights[key];
-  }
-
-  // Picks the fullest layout that fits the frame's height. `variants` are
-  // { key, w, draw } from fullest to most compact; the last one is the
-  // fallback. Returns the chosen one with its width clamped to the frame.
-  fit(ctx, variants) {
-    const room = this.frame.h - 24;
-    const sized = variants.map((v) => ({ ...v, w: Math.min(v.w, this.frame.w - 32) }));
-    return sized.find((v) => this.measure(ctx, `${v.key}:${Math.round(v.w)}`, v.w, v.draw) <= room) ?? sized[sized.length - 1];
-  }
-
-  // Seconds since the printout came free (or since the overlay opened).
-  get since() {
-    return this.printer ? this.printer.t - this.printer.end : this.t;
-  }
-
-  // The paper slot's resting height, near the bottom of the frame.
-  get slotY() {
-    return this.frame.y + this.frame.h - 26;
-  }
-
-  edge(seed, w) {
-    this.edges ??= new Map();
-    const key = `${seed}:${Math.round(w)}`;
-    if (!this.edges.has(key)) this.edges.set(key, tornEdge(w, seed));
-    return this.edges.get(key);
-  }
-
-  // The recorder housing, centered at cx. `stubs` are the torn-off scraps
-  // still sticking out of the slot: [{ x, w, seed }].
-  drawPrinter(ctx, cx, w, stubs = []) {
-    const pr = this.printer;
-    if (pr.raised <= 0) return;
-    const slot = this.slotY + (1 - pr.raised) * 90;
-    const x = cx - w / 2;
-    ctx.fillStyle = '#2c312b';
-    roundRectPath(ctx, x, slot - 12, w, 90, 8);
-    ctx.fill();
-    ctx.fillStyle = 'rgba(255,255,255,0.09)';
-    ctx.fillRect(x + 8, slot - 10, w - 16, 2);
-    ctx.fillStyle = '#0a0c09';
-    ctx.fillRect(x + 12, slot - 2, w - 24, 5);
-    ctx.fillStyle = C.paperDim;
-    for (const st of stubs) {
-      if (!st) continue;
-      ctx.beginPath();
-      ctx.moveTo(st.x, slot + 2);
-      for (const [tx, d] of this.edge(st.seed, st.w)) ctx.lineTo(st.x + tx, slot + 2 - (6.5 - d));
-      ctx.lineTo(st.x + st.w, slot + 2);
-      ctx.closePath();
-      ctx.fill();
-    }
-    ctx.fillStyle = '#394037';
-    ctx.fillRect(x, slot + 6, w, 80);
-    hazard(ctx, x, slot + 6, w, 4, 6);
-    mono(ctx, 'TEST RECORDER  DR-9', x + 16, slot + 22, 9, { weight: 600, color: C.muted });
-    const feeding = pr.t > RISE && pr.t < pr.feedEnd;
-    ctx.beginPath();
-    ctx.arc(x + w - 20, slot + 18, 3.5, 0, TAU);
-    ctx.fillStyle = feeding ? (Math.floor(pr.t * 14) % 2 ? C.ctYellow : '#5a4a10') : C.good;
-    ctx.fill();
-  }
-
-  // Draws `drawAt(y)` as a printout in `pose`: clipped at the slot while it
-  // is still attached, tipped about its bottom-right corner, torn once off.
-  paper(ctx, x, w, h, pose, seed, drawAt) {
-    ctx.save();
-    if (pose.clip) {
-      ctx.beginPath();
-      ctx.rect(this.frame.x - 40, this.slotY - 4000, this.frame.w + 80, 4000);
-      ctx.clip();
-    }
-    const px = x + w, py = pose.y + h;
-    ctx.translate(px, py);
-    ctx.rotate(pose.angle);
-    ctx.translate(-px, -py);
-    const used = pose.torn ? drawTorn(ctx, x, pose.y, w, h, this.edge(seed, w), () => drawAt(pose.y)) : drawAt(pose.y);
-    ctx.restore();
-    return used;
-  }
-
-  // Like sheet(), but the sheet comes out of the printer.
-  printSheet(ctx, key, w, draw) {
-    w = Math.min(w, this.frame.w - 32);
-    key += `:${Math.round(w)}`;
-    const h = this.measure(ctx, key, w, draw);
-    const R = this.ticketRect(w, h, false);
-    this.printer.setLength(h);
-    const pose = this.printer.pose(0, R.y, h, this.slotY);
-    this.drawPrinter(ctx, R.x + R.w / 2, R.w + 44, [pose.torn && { x: R.x, w: R.w, seed: 1 }]);
-    this.heights[key] = this.paper(ctx, R.x, R.w, h, pose, 1, (y) => draw(R.x, y, R.w, h));
-    return R;
-  }
-
-  // Rogue-lite: what this run paid and a way into the upgrades shop. Adds
-  // this.shopBtn to the buttons. Returns the y below it.
-  renderBudget(ctx, lx, cy, inner, short = false) {
-    if (!settings.rogueLite) return cy;
-    const play = this.play;
-    if (!short) {
-      fields(ctx, lx, cy, inner, [
-        { label: 'CREDITS EARNED', value: `+${play.run.payout ?? 0}`, color: '#2f7d43' },
-        { label: 'FACILITY BUDGET', value: `${meta.credits} CR` },
-      ]);
-      cy += 40 + 10;
-    }
-    if (!this.shopBtn) {
-      this.shopBtn = { x: 0, y: 0, w: 0, h: 42, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
-      this.buttons.push(this.shopBtn);
-      this.keys.u = this.shopBtn.onClick;
-    }
-    Object.assign(this.shopBtn, { x: lx, y: cy, w: inner });
-    const label = short ? `UPGRADES · +${play.run.payout ?? 0} · ${meta.credits} CR` : 'FACILITY UPGRADES';
-    this.drawButton(ctx, this.shopBtn, label, { primary: false, paper: true, key: 'U' });
-    return cy + 42 + 12;
-  }
-
-  // Title block above a spread of cards or tickets, on the dark backdrop.
-  heading(ctx, form, title, subtitle, color = C.paper) {
-    const R = this.frame;
-    const cx = R.x + R.w / 2;
-    mono(ctx, form, cx, R.y + 34, 11, { weight: 600, color: C.ctYellow, align: 'center', spacing: 1.5, maxWidth: R.w - 32 });
-    text(ctx, title, cx, R.y + 70, clamp(R.w * 0.05, 26, 38), { weight: 700, color, align: 'center', spacing: 3, maxWidth: R.w - 32 });
-    text(ctx, subtitle, cx, R.y + 95, 16, { weight: 500, color: C.paperDim, align: 'center', maxWidth: R.w - 32 });
-  }
-}
-
 // ---------------------------------------------------------------- title
 
 const CONTROLS = [
@@ -901,32 +268,61 @@ const CONTROLS = [
   ['ESC', 'Pause'],
 ];
 
+// With a saved run the title offers CONTINUE and NEW RUN (which asks once
+// before throwing the save away); without one, any tap starts a run.
 export class TitleOverlay extends Overlay {
   constructor(play) {
     super(play);
-    this.tapAnywhere = () => this.close(() => this.play.newRun());
+    this.save = loadRun();
+    this.confirmNew = false;
+    const begin = () => this.close(() => this.play.newRun());
     this.gearBtn = { x: 0, y: 0, w: 40, h: 40, onClick: () => play.engine.push(new SettingsOverlay(play)) };
-    this.upgradeBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
-    this.keys = { enter: this.tapAnywhere, ' ': this.tapAnywhere, s: this.gearBtn.onClick, u: () => settings.rogueLite && this.upgradeBtn.onClick() };
+    this.upgradeBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new TreeOverlay(play)) };
+    this.recordsBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new ScoresOverlay(play)) };
+    this.keys = { s: this.gearBtn.onClick, u: () => settings.rogueLite && this.upgradeBtn.onClick(), r: this.recordsBtn.onClick };
+    if (this.save) {
+      this.continueBtn = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close(() => this.play.continueRun()) };
+      this.newBtn = {
+        x: 0, y: 0, w: 0, h: 46,
+        onClick: () => {
+          if (this.confirmNew) begin();
+          else {
+            this.confirmNew = true;
+            this.play.sfx.select();
+          }
+        },
+      };
+      this.keys.enter = this.keys[' '] = this.continueBtn.onClick;
+      this.keys.n = this.newBtn.onClick;
+    } else {
+      this.tapAnywhere = begin;
+      this.keys.enter = this.keys[' '] = begin;
+    }
   }
 
-  // Settings, and the upgrades shop in rogue-lite, in the top-right corner.
+  // Records, the upgrade tree in rogue-lite, and settings, top right.
   renderCorner(ctx) {
     const L = this.L;
-    Object.assign(this.gearBtn, { x: L.w - 16 - 40, y: 14 });
-    this.buttons = [this.gearBtn];
+    const narrow = L.w < 560;
+    let x = L.w - 16 - 40;
+    Object.assign(this.gearBtn, { x, y: 14 });
     gearButton(ctx, this.gearBtn, { dark: true });
-    if (!settings.rogueLite) return;
-    const label = `UPGRADES · ${meta.credits} CR`;
-    const w = measure(ctx, label, 15, F.body, 700, 2) + 36;
-    Object.assign(this.upgradeBtn, { x: this.gearBtn.x - 10 - w, y: 14, w });
-    this.buttons.push(this.upgradeBtn);
-    this.drawButton(ctx, this.upgradeBtn, label, { primary: false });
+    const corner = [this.gearBtn];
+    const add = (b, label) => {
+      const w = measure(ctx, label, 17, F.body, 700, 2.5) + 30;
+      x -= 10 + w;
+      Object.assign(b, { x, y: 14, w });
+      this.drawButton(ctx, b, label, { primary: false });
+      corner.push(b);
+    };
+    if (settings.rogueLite) add(this.upgradeBtn, narrow ? 'UPGRADES' : `UPGRADES · ${meta.credits} CR`);
+    add(this.recordsBtn, 'RECORDS');
+    this.buttons = this.save ? [...corner, this.continueBtn, this.newBtn] : corner;
   }
 
   update(dt, isTop) {
     super.update(dt, isTop);
-    if (isTop) this.play.engine.cursor = 'pointer';
+    if (isTop && this.tapAnywhere && !this.buttons.some((b) => b.hover)) this.play.engine.cursor = 'pointer';
   }
 
   // The logo, set on paper: DUMMY in ink, RUN on a strip of hazard tape.
@@ -978,9 +374,10 @@ export class TitleOverlay extends Overlay {
       }
     }
     cy += 24;
+    const best = topScores()[0]?.score;
     fields(ctx, lx, cy, inner, [
-      { label: 'BEST FLOOR', value: play.bestDepth > 0 ? floorName(play.bestDepth) : '-' },
-      { label: 'CERTIFIED RUNS', value: String(play.wins) },
+      { label: 'HIGH SCORE', value: best ? best.toLocaleString('en-US') : '-', flex: 1.1 },
+      { label: 'BEST FLOOR', value: play.bestDepth > 0 ? floorName(play.bestDepth) : '-', flex: 0.9 },
       { label: 'REACTIONS LOGGED', value: `${play.status.discovered.size}/${REACTION_IDS.length}` },
       settings.rogueLite ? { label: 'CREDITS', value: String(meta.credits), color: '#2f7d43', flex: 0.8 } : null,
     ].filter(Boolean));
@@ -1021,7 +418,7 @@ export class TitleOverlay extends Overlay {
     const h = this.heights[key];
     // Phones keep the top strip clear for the corner buttons.
     const top = wide || short ? 0 : 60;
-    const room = L.h - top - (short ? 56 : 104);
+    const room = L.h - top - (short ? (this.save ? 64 : 56) : 104);
     const s = Math.min(1, room / h);
     const x = wide ? Math.max(48, L.w * 0.06) : (L.w - w * s) / 2;
     const y = top + Math.max(12, (room - h * s) / 2 + (short ? 4 : 12)) + (1 - easeOutBack(this.t / 0.45)) * 50;
@@ -1035,14 +432,25 @@ export class TitleOverlay extends Overlay {
     this.heights[key] = this.cover(ctx, 0, 0, w, h, opts);
     ctx.restore();
 
-    const py = y + h * s + (short ? 26 : 44);
     const px = wide ? x + (w * s) / 2 : L.w / 2;
-    ctx.globalAlpha = a * pulse(this.t);
-    ctx.globalAlpha = a;
     this.renderCorner(ctx);
-    ctx.globalAlpha = a * pulse(this.t);
-    const verb = this.fine ? 'CLICK OR PRESS SPACE' : 'TAP';
-    text(ctx, `${verb} TO BEGIN TESTING`, px, py, short ? 18 : 22, { weight: 700, color: C.paper, align: 'center', spacing: 3, maxWidth: L.w - 24 });
+    if (this.save) {
+      // Resume the saved run, or start over.
+      const r = this.save.run;
+      const bh = short ? 40 : 46;
+      const bw = Math.min(250, (L.w - 44) / 2);
+      const by = y + h * s + (short ? 12 : 22);
+      Object.assign(this.continueBtn, { x: px - bw - 6, y: by, w: bw, h: bh });
+      Object.assign(this.newBtn, { x: px + 6, y: by, w: bw, h: bh });
+      const keys = bw >= 220;
+      this.drawButton(ctx, this.continueBtn, `CONTINUE · ${r.act}-${r.floor}`, { key: keys ? 'SPACE' : null });
+      this.drawButton(ctx, this.newBtn, this.confirmNew ? 'DISCARD SAVE?' : 'NEW RUN', { primary: false, key: keys ? 'N' : null });
+    } else {
+      const py = y + h * s + (short ? 26 : 44);
+      ctx.globalAlpha = a * pulse(this.t);
+      const verb = this.fine ? 'CLICK OR PRESS SPACE' : 'TAP';
+      text(ctx, `${verb} TO BEGIN TESTING`, px, py, short ? 18 : 22, { weight: 700, color: C.paper, align: 'center', spacing: 3, maxWidth: L.w - 24 });
+    }
     ctx.restore();
   }
 }
@@ -1446,13 +854,13 @@ export class CardOverlay extends Overlay {
       if (rows) {
         const pose = poses[0];
         this.paper(ctx, first.x, first.w, len, pose, 1, (y) => {
-          shadows = false;
+          setShadows(false);
           rects.forEach((r, i) => {
             const cy = y + (r.y - first.y);
             if (i < n - 1 && pose.free < 1) this.perforation(ctx, r.x, cy + r.h, r.w, rects[i + 1].y - (r.y + r.h), 1 - pose.free);
             drawCard(ctx, this.offer[i], r.x, cy, r.w, r.h, true, i + 1, { keys });
           });
-          shadows = true;
+          setShadows(true);
         });
       } else {
         rects.forEach((r, i) => this.paper(ctx, r.x, r.w, r.h, poses[i], i + 1, (y) => drawCard(ctx, this.offer[i], r.x, y, r.w, r.h, false, i + 1, { keys })));
@@ -1765,7 +1173,7 @@ export class RouteOverlay extends Overlay {
     const boss = this.route[0].type === 'boss';
     const keyHint = this.fine && !boss ? '  Press 1-3.' : '';
     const sub = `Act ${run.act} · ${run.actDef.name} · floor ${run.floor} of ${FLOORS_PER_ACT}${run.loop ? ` · endless ${run.loop}` : ''}${keyHint}`;
-    this.heading(ctx, 'FORM DR-4 · TEST SCHEDULE', boss ? 'BOSS TEST' : 'SCHEDULE THE NEXT TEST', sub, boss ? C.bad : C.paper);
+    this.heading(ctx, 'FORM DR-4 · TEST SCHEDULE · RUN SAVED', boss ? 'BOSS TEST' : 'SCHEDULE THE NEXT TEST', sub, boss ? C.bad : C.paper);
     this.tickets.forEach((t, i) => {
       const k = easeOutBack((this.t - i * 0.07) / 0.3);
       if (k <= 0) return;
@@ -1969,6 +1377,47 @@ function summaryTable(ctx, rows, lx, rx, cy) {
   return cy;
 }
 
+// The score field for a finished run: its rank on the records, if it placed.
+function scoreField(run) {
+  const label = run.rank === 1 ? 'TEST SCORE · NEW RECORD' : run.rank ? `TEST SCORE · #${run.rank}` : 'TEST SCORE';
+  return { label, value: runScoreText(run), color: run.rank === 1 ? '#2f7d43' : C.formInk, flex: 1.3 };
+}
+
+const runScoreText = (run) => (run.score ?? 0).toLocaleString('en-US');
+
+// Under a finished run: rogue-lite credits, then buttons for the records and
+// (in rogue-lite) the upgrade tree. Adds the buttons to the overlay once.
+// Returns the y below them.
+function renderFiling(o, ctx, lx, cy, inner, short) {
+  const play = o.play;
+  const lite = settings.rogueLite;
+  if (lite && !short) {
+    fields(ctx, lx, cy, inner, [
+      { label: 'CREDITS EARNED', value: `+${play.run.payout ?? 0}`, color: '#2f7d43' },
+      { label: 'FACILITY BUDGET', value: `${meta.credits} CR` },
+    ]);
+    cy += 40 + 10;
+  }
+  if (!o.recordsBtn) {
+    o.recordsBtn = { x: 0, y: 0, w: 0, h: 42, onClick: () => play.engine.push(new ScoresOverlay(play, play.run.scoreId)) };
+    o.shopBtn = { x: 0, y: 0, w: 0, h: 42, onClick: () => play.engine.push(new TreeOverlay(play)) };
+    o.buttons.push(o.recordsBtn);
+    o.keys.r = o.recordsBtn.onClick;
+    if (lite) {
+      o.buttons.push(o.shopBtn);
+      o.keys.u = o.shopBtn.onClick;
+    }
+  }
+  const half = (inner - 10) / 2;
+  Object.assign(o.recordsBtn, { x: lx, y: cy, w: lite ? half : inner });
+  o.drawButton(ctx, o.recordsBtn, 'RECORDS', { primary: false, paper: true, key: 'R' });
+  if (lite) {
+    Object.assign(o.shopBtn, { x: lx + half + 10, y: cy, w: half });
+    o.drawButton(ctx, o.shopBtn, short ? `UPGRADES · +${play.run.payout ?? 0}` : 'UPGRADES', { primary: false, paper: true, key: 'U' });
+  }
+  return cy + 42 + 12;
+}
+
 export class GameOverOverlay extends Overlay {
   constructor(play) {
     super(play);
@@ -2000,11 +1449,10 @@ export class GameOverOverlay extends Overlay {
     const fav = Object.entries(run.weaponDamage).sort((p, q) => q[1] - p[1])[0]?.[0];
     report(ctx, x, y, w, h, 'TEST TERMINATED', { tone: C.pen, kicker: kicker(play), form: short ? null : 'FORM DR-10 · FAILURE REPORT' });
     let cy = y + HEAD + 12;
-    const best = play.round.number >= play.bestDepth;
     fields(ctx, lx, cy, inner, [
-      { label: 'REACHED FLOOR', value: `${play.round.act}-${play.round.floor}` },
-      { label: 'BEST', value: best ? 'NEW BEST' : floorName(play.bestDepth), color: best ? '#2f7d43' : C.formInk },
-      { label: 'CAUSE', value: 'TIME LIMIT', color: C.pen, flex: 1.2 },
+      { label: 'REACHED FLOOR', value: `${play.round.act}-${play.round.floor}`, flex: 0.9 },
+      scoreField(run),
+      { label: 'CAUSE', value: 'TIME LIMIT', color: C.pen },
     ]);
     cy += 40 + 30;
     section(ctx, lx, cy, inner, 1, 'RUN SUMMARY');
@@ -2017,7 +1465,7 @@ export class GameOverOverlay extends Overlay {
       cy += paragraph(ctx, cards, lx, cy + 16, inner, 14, 18, { maxLines: 4 });
     }
     cy += 18;
-    cy = this.renderBudget(ctx, lx, cy, inner, short);
+    cy = renderFiling(this, ctx, lx, cy, inner, short);
     Object.assign(this.btn, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.btn, 'NEW RUN', { key: 'SPACE' });
     stampMark(ctx, 'VOID', rx - 46, y + 31, C.pen, this.since - 0.05, 24);
@@ -2057,8 +1505,8 @@ export class VictoryOverlay extends Overlay {
     report(ctx, x, y, w, h, 'SERIES CERTIFICATION', { tone: C.rate[0], kicker: kicker(this.play), form: short ? null : 'FORM DR-11 · CERTIFICATE OF DESTRUCTION' });
     let cy = y + HEAD + 12;
     fields(ctx, lx, cy, inner, [
-      { label: 'SERIES', value: `${ACTS.length}/${ACTS.length} ACTS` },
-      { label: 'CERTIFIED RUNS', value: String(this.play.wins) },
+      { label: 'SERIES', value: `${ACTS.length}/${ACTS.length} ACTS`, flex: 0.9 },
+      scoreField(run),
       { label: 'RESULT', value: 'DESTROYED', color: '#2f7d43' },
     ]);
     cy += 40;
@@ -2070,7 +1518,7 @@ export class VictoryOverlay extends Overlay {
     section(ctx, lx, cy, inner, 1, 'RUN SUMMARY');
     cy = summaryTable(ctx, runRows(run, fav).slice(0, short ? 2 : 99), lx, rx, cy + 2);
     cy += 20;
-    cy = this.renderBudget(ctx, lx, cy, inner, short);
+    cy = renderFiling(this, ctx, lx, cy, inner, short);
     Object.assign(this.endless, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.endless, 'KEEP TESTING', { key: 'SPACE' });
     cy += 60;
@@ -2094,7 +1542,7 @@ export class PlaceOverlay extends Overlay {
     this.marks = [];
     this.ghost = createTrap(trapId, null, Math.max(1, play.run.trapLevel(trapId)));
     this.skip = { x: 0, y: 0, w: 0, h: 40, onClick: () => this.close(this.onDone) };
-    for (let i = 1; i <= 8; i++) this.keys[String(i)] = () => this.marks.filter((m) => m.ok)[i - 1]?.onClick();
+    for (let i = 1; i <= 8; i++) this.keys[String(i)] = () => this.numbered()[i - 1]?.onClick();
   }
 
   layoutMarks() {
@@ -2115,6 +1563,13 @@ export class PlaceOverlay extends Overlay {
     const w = Math.min(240, R.w - 32);
     const A = this.play.layout.arena;
     Object.assign(this.skip, { x: A.x + (A.w - w) / 2, y: A.y + A.h * 0.55 + 58, w });
+  }
+
+  // Mounts that take this trap, numbered empty ones first so the low keys
+  // never replace a trap by accident.
+  numbered() {
+    const ok = this.marks.filter((m) => m.ok);
+    return [...ok.filter((m) => !m.occupant), ...ok.filter((m) => m.occupant)];
   }
 
   place(m) {
@@ -2160,6 +1615,7 @@ export class PlaceOverlay extends Overlay {
     ctx.save();
     ctx.globalAlpha = a;
     let n = 0;
+    const order = this.numbered();
     for (const m of this.marks) {
       if (!m.ok) {
         ctx.fillStyle = 'rgba(239,234,223,0.25)';
@@ -2187,7 +1643,7 @@ export class PlaceOverlay extends Overlay {
       } else {
         target(ctx, m.sx, m.sy, 14 * (m.hover ? 1.15 : 1));
       }
-      if (this.fine) keycap(ctx, String(n), m.sx + 18, m.sy - 22, { dark: true });
+      if (this.fine) keycap(ctx, String(order.indexOf(m) + 1), m.sx + 18, m.sy - 22, { dark: true });
     }
 
     // An installation order across the middle of the arena, clear of the mounts.
@@ -2224,7 +1680,7 @@ export class SettingsOverlay extends Overlay {
       { key: 'rogueLite', title: 'Rogue-lite mode', desc: 'Runs pay out credits when they end. Spend them on permanent facility upgrades that apply from your next run. Off: every run starts from scratch.' },
     ].map((r) => ({ ...r, x: 0, y: 0, w: 0, h: 0, onClick: () => this.flip(r.key) }));
     this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };
-    this.shop = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new UpgradeOverlay(play)) };
+    this.shop = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new TreeOverlay(play)) };
     this.keys = { escape: this.done.onClick, enter: this.done.onClick, s: this.done.onClick, 1: () => this.flip('gore'), 2: () => this.flip('rogueLite') };
   }
 
@@ -2288,130 +1744,5 @@ export class SettingsOverlay extends Overlay {
     this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
     this.buttons.push(this.done);
     return cy + this.done.h + 14 + (short ? 0 : FOOT) - y;
-  }
-}
-
-// ------------------------------------------------------------- upgrades
-
-// The rogue-lite shop: spend credits on upgrades that apply to new runs.
-export class UpgradeOverlay extends Overlay {
-  constructor(play) {
-    super(play);
-    this.blocksUpdate = true;
-    this.items = UPGRADES.map((u) => ({ u, x: 0, y: 0, w: 0, h: 0, onClick: () => this.buy(u) }));
-    this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };
-    this.keys = { escape: this.done.onClick, enter: this.done.onClick, u: this.done.onClick };
-    this.items.forEach((it, i) => {
-      this.keys[String(i + 1)] = it.onClick;
-    });
-    this.flash = null;
-  }
-
-  buy(u) {
-    if (buyUpgrade(u)) {
-      this.play.sfx.install();
-      this.flash = { id: u.id, t: 0.5 };
-    } else {
-      this.play.sfx.bonusFail();
-    }
-  }
-
-  update(dt, isTop) {
-    if (this.flash) {
-      this.flash.t -= dt;
-      if (this.flash.t <= 0) this.flash = null;
-    }
-    super.update(dt, isTop);
-  }
-
-  render(ctx) {
-    const a = this.appear;
-    dim(ctx, this.frame, a * 1.1);
-    ctx.save();
-    ctx.globalAlpha = a;
-    const variants = [{ key: 'one', w: 500, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, 1) }];
-    if (this.frame.w >= 720) variants.push({ key: 'two', w: 780, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, 2) });
-    const v = this.fit(ctx, variants);
-    this.sheet(ctx, v.key, v.w, v.draw, false);
-    ctx.restore();
-  }
-
-  body(ctx, x, y, w, h, cols) {
-    const play = this.play;
-    const lx = x + 18;
-    const inner = w - 36;
-    const compact = cols === 2;
-    report(ctx, x, y, w, h, 'FACILITY UPGRADES', { tone: '#2f7d43', kicker: `CAPITAL REQUISITION  ·  ${TODAY}`, form: compact ? null : 'FORM DR-15 · CAPITAL REQUISITION', reserve: compact ? 150 : 0 });
-    let cy = y + HEAD + 12;
-    const owned = UPGRADES.reduce((n, u) => n + upgradeLevel(u.id), 0);
-    const total = UPGRADES.reduce((n, u) => n + u.costs.length, 0);
-    if (compact) {
-      mono(ctx, `BUDGET ${meta.credits} CR`, x + w - 18, y + 46, 15, { weight: 700, color: '#2f7d43', align: 'right' });
-    } else {
-      fields(ctx, lx, cy, inner, [
-        { label: 'FACILITY BUDGET', value: `${meta.credits} CR`, color: '#2f7d43' },
-        { label: 'UPGRADES OWNED', value: `${owned}/${total}` },
-      ]);
-      cy += 40 + 4;
-    }
-    const note = play.state === 'title' ? 'Upgrades apply to every new run while rogue-lite mode is on.' : 'Upgrades you buy now apply when your next run starts.';
-    cy += 20;
-    text(ctx, note, lx, cy, 14, { weight: 500, color: C.formMuted, maxWidth: inner });
-    cy += 4;
-
-    const colW = (inner - (cols - 1) * 16) / cols;
-    const rowH = compact ? 44 : 52;
-    const perCol = Math.ceil(this.items.length / cols);
-    this.items.forEach((it, i) => {
-      const col = Math.floor(i / perCol);
-      const row = i % perCol;
-      const rx0 = lx + col * (colW + 16);
-      const ry = cy + 8 + row * rowH;
-      this.drawItem(ctx, it, i, rx0, ry, colW, rowH);
-    });
-    cy += 8 + perCol * rowH + 12;
-    Object.assign(this.done, { x: lx, y: cy, w: inner });
-    this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
-    this.buttons = [...this.items, this.done];
-    return cy + this.done.h + 14 + (compact ? 0 : FOOT) - y;
-  }
-
-  drawItem(ctx, it, i, x, y, w, h) {
-    const u = it.u;
-    const lv = upgradeLevel(u.id);
-    const cost = upgradeCost(u);
-    const afford = cost !== null && meta.credits >= cost;
-    if (this.flash?.id === u.id) {
-      ctx.fillStyle = `rgba(95,211,138,${this.flash.t * 0.6})`;
-      ctx.fillRect(x - 6, y, w + 12, h - 4);
-    } else if (it.hover && afford) {
-      ctx.fillStyle = C.ruleSoft;
-      ctx.fillRect(x - 6, y, w + 12, h - 4);
-    }
-    Object.assign(it, { x: x - 6, y, w: w + 12, h: h - 4 });
-    mono(ctx, `U-${String(i + 1).padStart(2, '0')}`, x, y + 18, 10, { weight: 600, color: C.formMuted });
-    const tx = x + 40;
-    const bw = 86;
-    text(ctx, u.name, tx, y + 19, 16, { weight: 700, maxWidth: w - 40 - bw - 60 });
-    // Level pips.
-    const pipX = tx + Math.min(measure(ctx, u.name, 16, F.body, 700), w - 40 - bw - 60) + 10;
-    for (let k = 0; k < u.costs.length; k++) {
-      ctx.fillStyle = k < lv ? '#2f7d43' : C.ruleSoft;
-      ctx.fillRect(pipX + k * 11, y + 9, 8, 10);
-    }
-    text(ctx, u.desc, tx, y + 37, 13, { weight: 500, color: C.formMuted, maxWidth: w - 40 - bw - 10 });
-    // Price tag.
-    const bx = x + w - bw, by = y + 8;
-    const label = cost === null ? 'MAXED' : `${cost} CR`;
-    if (cost !== null && afford) {
-      ctx.fillStyle = C.formInk;
-      ctx.fillRect(bx, by, bw, 28);
-    }
-    ctx.strokeStyle = cost === null ? '#2f7d43' : afford ? C.formInk : C.rule;
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(bx + 0.75, by + 0.75, bw - 1.5, 26.5);
-    mono(ctx, label, bx + bw / 2, by + 15, 12, { weight: 700, color: cost === null ? '#2f7d43' : afford ? C.paper : C.rule, align: 'center', baseline: 'middle' });
-    if (this.fine && cost !== null) keycap(ctx, String(i + 1), bx - keyW(ctx, String(i + 1)) - 8, by + 14);
-    rule(ctx, x, x + w, y + h - 4, C.ruleSoft);
   }
 }

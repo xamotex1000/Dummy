@@ -32,6 +32,17 @@ export class Run {
     this.statusMult = 1;
     this.reactionMult = 1;
     this.chainReaction = false;
+    // Set by the rogue-lite tree.
+    this.weaponMult = 1;
+    this.trapMult = 1;
+    this.chainStep = 0;
+    this.overclock = false;
+    this.bossRerolls = 0;
+    this.startLevel = 1;
+    this.extraStarter = false;
+    this.extraTrap = false;
+    this.prewired = false;
+    this.trapStartLevel = 1;
 
     // Dummy modifiers
     this.dummyHpMult = 1;
@@ -91,7 +102,7 @@ export class Run {
   installTrap(id, mountId) {
     this.traps = this.traps.filter((t) => t.mount !== mountId);
     this.traps.push({ id, mount: mountId });
-    if (!this.trapLevels[id]) this.trapLevels[id] = 1;
+    if (!this.trapLevels[id]) this.trapLevels[id] = this.trapStartLevel;
   }
 
   // The owned weapon that has dealt the most damage this run.

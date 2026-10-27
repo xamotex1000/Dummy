@@ -1,19 +1,14 @@
 // Rogue-lite progress: every run that ends pays out credits, and credits buy
-// permanent facility upgrades that apply when a new run starts. Only used
-// with the rogue-lite setting on; the plain roguelike starts every run cold.
+// nodes on the progression tree (tree.js), applied when a new run starts.
+// Only used with the rogue-lite setting on; the plain roguelike starts
+// every run cold. Saved in the browser.
+
+import { TREE, node } from './tree.js';
 
 const KEY = 'dummy-run-meta';
 
-// Each upgrade has a cost per level; its length is the max level.
-export const UPGRADES = [
-  { id: 'funding', name: 'Research Funding', desc: 'Start each run with +1 reroll.', costs: [40, 80, 140], apply: (run, lv) => { run.rerolls += lv; } },
-  { id: 'overtime', name: 'Overtime Clause', desc: 'Every floor gets +3 seconds on the clock.', costs: [50, 100, 160], apply: (run, lv) => { run.timeBonus += 3 * lv; } },
-  { id: 'toolkit', name: 'Calibrated Tools', desc: 'Your starting weapon begins at level 2.', costs: [90], apply: (run) => { run.toolkit = true; } },
-  { id: 'prewired', name: 'Pre-Wired Cell', desc: 'Your first trap begins at level 2.', costs: [90], apply: (run) => { run.prewired = true; } },
-  { id: 'shortlist', name: 'Longer Shortlist', desc: 'One more card to choose from on every pick.', costs: [180], apply: (run) => { run.choices += 1; } },
-  { id: 'insurance', name: 'Insurance Policy', desc: 'Start each run with a Second Wind.', costs: [160], apply: (run) => { run.lives += 1; } },
-  { id: 'salvage', name: 'Salvage Rights', desc: '+25% credits from every run.', costs: [70, 150], apply: () => {} },
-];
+// What the old flat upgrade shop charged, so its purchases can be refunded.
+const OLD_COSTS = { funding: [40, 80, 140], overtime: [50, 100, 160], toolkit: [90], prewired: [90], shortlist: [180], insurance: [160], salvage: [70, 150] };
 
 function read() {
   try {
@@ -23,45 +18,60 @@ function read() {
   }
 }
 
-export const meta = { credits: 0, levels: {}, ...read() };
+const saved = read();
+export const meta = { credits: saved.credits ?? 0, owned: new Set((saved.owned ?? []).filter((id) => node(id))) };
+meta.owned.add('start');
 
 function write() {
   try {
-    localStorage.setItem(KEY, JSON.stringify(meta));
+    localStorage.setItem(KEY, JSON.stringify({ credits: meta.credits, owned: [...meta.owned] }));
   } catch {
     /* storage is optional */
   }
 }
 
-export const upgradeLevel = (id) => meta.levels[id] ?? 0;
-
-export function upgradeCost(u) {
-  return u.costs[upgradeLevel(u.id)] ?? null;
+// The flat shop became the tree: refund what was spent there.
+if (saved.levels) {
+  for (const [id, lv] of Object.entries(saved.levels)) meta.credits += (OLD_COSTS[id] ?? []).slice(0, lv).reduce((a, b) => a + b, 0);
+  write();
 }
 
-export function buyUpgrade(u) {
-  const cost = upgradeCost(u);
-  if (cost === null || meta.credits < cost) return false;
-  meta.credits -= cost;
-  meta.levels[u.id] = upgradeLevel(u.id) + 1;
+// owned: bought. open: next to an owned node, so it can be bought.
+// hinted: next to an open node; shown only as an undiscovered marker.
+// hidden: not drawn at all.
+export function nodeState(id) {
+  if (meta.owned.has(id)) return 'owned';
+  const n = node(id);
+  if (n.links.some((m) => meta.owned.has(m))) return 'open';
+  if (n.links.some((m) => node(m).links.some((k) => meta.owned.has(k)))) return 'hinted';
+  return 'hidden';
+}
+
+export function buyNode(id) {
+  const n = node(id);
+  if (nodeState(id) !== 'open' || meta.credits < n.cost) return false;
+  meta.credits -= n.cost;
+  meta.owned.add(id);
   write();
   return true;
 }
 
-// Owned upgrades, applied to a fresh run.
-export function applyUpgrades(run) {
-  for (const u of UPGRADES) {
-    const lv = upgradeLevel(u.id);
-    if (lv) u.apply(run, lv);
-  }
+export const ownedCount = () => meta.owned.size;
+export const nodeCount = () => TREE.nodes.length;
+
+// Owned nodes, applied to a fresh run.
+export function applyTree(run) {
+  for (const id of meta.owned) node(id)?.apply(run);
 }
+
+export const creditBonus = () => [...meta.owned].reduce((sum, id) => sum + (node(id)?.credits ?? 0), 0);
 
 // What the run has earned so far: floors, secondaries and reactions, plus a
 // bonus for finishing the series.
 export function runCredits(run) {
   const t = run.totals;
   const base = t.cleared * 10 + t.bonuses * 5 + t.reactions * 2 + (run.won ? 100 : 0);
-  return Math.round(base * (1 + 0.25 * upgradeLevel('salvage')));
+  return Math.round(base * (1 + creditBonus()));
 }
 
 // Pays out what the run earned since the last payout (a won run that keeps
