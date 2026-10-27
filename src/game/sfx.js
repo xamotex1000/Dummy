@@ -142,6 +142,18 @@ export class Sfx {
     }
   }
 
+  spring() {
+    if (!this.a.throttle('spring', 80)) return;
+    this.a.tone({ freq: 180, freqEnd: 620, dur: 0.22, gain: 0.25, type: 'triangle' });
+    this.a.tone({ freq: 90, freqEnd: 60, dur: 0.1, gain: 0.25 });
+  }
+
+  install() {
+    this.a.noise({ dur: 0.06, type: 'highpass', freq: 2500, gain: 0.3 });
+    this.a.tone({ freq: 300, dur: 0.08, gain: 0.12, type: 'square', delay: 0.05 });
+    this.a.tone({ freq: 450, dur: 0.08, gain: 0.12, type: 'square', delay: 0.12 });
+  }
+
   select() {
     this.a.tone({ freq: 880, dur: 0.04, gain: 0.08, type: 'square' });
   }

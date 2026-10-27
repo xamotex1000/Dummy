@@ -1,6 +1,6 @@
 # Dummy Run
 
-A proof-of-concept roguelike inspired by *Kick the Buddy*. You fight through three acts of test dummies, picking your route between floors, drafting weapons and mods, and combining fire, ice, shocks, nails and blasts into reactions.
+A proof-of-concept roguelike inspired by *Kick the Buddy*. Over a run you bolt a machine of traps into the cell (springs, spinners, saws, fans, tesla coils, crushers), then feed the dummy into it. You fight through three acts, pick your route between floors, draft weapons, traps and mods, and chain fire, ice, shocks, nails and blasts into reactions.
 
 Everything runs on a small custom engine written for this project: plain JavaScript and Canvas 2D, with no libraries and no build step.
 
@@ -33,7 +33,7 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 
 ## How a run works
 
-- **Structure.** Pick a starting weapon from three (Hands are always free), then fight through **three acts of five floors**. Floor 5 of each act is a boss. Beat act 3 to win the run, then keep going in endless mode if you like.
+- **Structure.** Pick a starting weapon and a first trap from three each (Hands are always free), then fight through **three acts of five floors**. Floor 5 of each act is a boss. Beat act 3 to win the run, then keep going in endless mode if you like.
 - **Acts** change the arena:
   - **Padded Cell:** normal.
   - **Crash Lab:** low gravity.
@@ -79,6 +79,28 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
   - **Dummy mods.**
   - **Perks:** damage, crit, time, combo, rerolls, Second Wind, and reaction perks like Chemistry Set, Catalyst and Chain Reaction.
   - **Trade-offs.**
+
+## The machine
+
+Traps are the heart of a run. They bolt onto **8 mount points** (three on the floor, three on the ceiling, one on each wall) and act on their own every round. You start each run with one, more come from cards, and each trap type levels up with its own two perks.
+
+| Trap | Mounts on | What it does |
+| --- | --- | --- |
+| Spring Pad | Floor | Launches anything that lands on it into the ceiling |
+| Spinner | Floor, ceiling, wall | A motorized bat arm. Blunt, so it shatters ice |
+| Fan | Floor, wall | On the floor it juggles the dummy in mid-air; on a wall it pins it |
+| Flame Jet | Floor, wall | Fires a jet of flame every few seconds |
+| Floor Saw | Floor | A circular saw running back and forth on a track |
+| Tesla Coil | Floor, ceiling | Zaps the nearest dummy and sets off shock reactions |
+| Cryo Sprinkler | Ceiling | Freezes whatever is below it |
+| Nail Turret | Wall, ceiling | Tracks the dummy and nails it to the wall |
+| Crusher | Ceiling | Slams down on anything that passes beneath it |
+
+Traps work together. A spring pad under a crusher, a cryo sprinkler over a spinner, a tesla coil next to a nail turret: each pair sets off something neither does alone.
+
+**Chain.** Every distinct damage source that has landed a hit in the last 2 seconds adds +15% to all damage. A single weapon stays flat, while a machine with six things going off at once snowballs. The current chain shows in the top-right of the arena.
+
+Trap damage is credited to the trap, so it never breaks weapon bonuses like "Stick to one weapon." Two goals are built around it: the objective *Your traps deal X damage*, and the bonus *Hands off: only traps deal damage*.
 
 ## Reactions
 
@@ -157,6 +179,7 @@ src/
     variants.js      dummy variants, the three acts, crate twists
     statuses.js      bleed / burn / freeze / shock / nails, and the reactions between them
     reactions.js     reaction list, codex discovery storage
+    traps.js         the machine: mount points and the nine traps
     projectiles.js   grenades, anvils, rockets, vortexes
     entrances.js     per-act spawn animations (cell door, ceiling hatch, chute)
     weapons.js       weapon definitions (input handlers, held-weapon physics config, perks)
@@ -185,6 +208,7 @@ How the main pieces fit together:
 - **Tear Away** reads `Stick.strain` from the physics step: how stretched a stick was before the solver corrected it.
 - **Adding content.** Each of these is a single entry:
   - a weapon: `WEAPONS`
+  - a trap: `TRAPS`, each with `update` and `draw`
   - a dummy variant: `VARIANTS`
   - an act: `ACTS`
   - an objective: `PRIMARY`

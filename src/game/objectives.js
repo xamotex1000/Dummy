@@ -38,6 +38,10 @@ export const PRIMARY = {
     const target = round5(20 + r * 2.5);
     return { type: 'bigHit', target, label: `Land one ${target}+ damage hit`, hint: 'Fast swings, anvils, rockets and reactions hit hardest.' };
   },
+  trapDamage(r) {
+    const target = round10(60 * Math.pow(1.18, r - 1));
+    return { type: 'trapDamage', target, label: `Your traps deal ${target} damage`, hint: 'The machine does the work. Feed the dummy into it.' };
+  },
   reactions(r) {
     const target = 1 + Math.floor(r / 6);
     return {
@@ -89,6 +93,11 @@ export const SECONDARY = [
     make: () => ({ label: 'No impact damage' }),
   },
   {
+    id: 'handsOff',
+    ok: ({ run, primary }) => run.traps.length >= 2 && primary.type !== 'boss',
+    make: () => ({ label: 'Hands off: only traps deal damage' }),
+  },
+  {
     id: 'reaction',
     ok: ({ run, primary }) => primary.type !== 'reactions' && reactionsPossible(run),
     make: () => ({ got: false, label: 'Trigger any reaction' }),
@@ -119,6 +128,7 @@ export function makeRound(run, rng, node) {
   } else {
     let pool = depth <= 1 ? ['damage'] : depth === 2 ? ['damage', 'kills', 'impact'] : ['damage', 'kills', 'impact', 'severs', 'bigHit'];
     if (depth > 2 && reactionsPossible(run)) pool.push('reactions');
+    if (depth > 1 && run.traps.length >= 1) pool.push('trapDamage');
     if (node.twist === 'swarm') pool = ['kills'];
     const choices = pool.length > 1 ? pool.filter((t) => t !== run.lastPrimary) : pool;
     const kind = rng.pick(choices);
@@ -203,6 +213,7 @@ export function primaryProgress(round, stats) {
     case 'severs': return stats.severs;
     case 'bigHit': return stats.maxHit;
     case 'reactions': return stats.reactions;
+    case 'trapDamage': return stats.trapDamage;
   }
   return 0;
 }
@@ -216,13 +227,16 @@ export function secondaryEvent(sec, type, ev) {
       fail = type === 'damage' && ev.group !== sec.group;
       break;
     case 'banWeapon':
-      fail = type === 'damage' && ev.weapon === sec.weapon;
+      fail = type === 'damage' && !ev.trap && ev.weapon === sec.weapon;
+      break;
+    case 'handsOff':
+      fail = type === 'damage' && !ev.trap;
       break;
     case 'noKill':
       fail = type === 'kill';
       break;
     case 'oneWeapon':
-      if (type === 'damage') {
+      if (type === 'damage' && !ev.trap) {
         if (!sec.weapon) {
           sec.weapon = ev.weapon;
           sec.label = `Stick to one weapon (${WEAPONS[ev.weapon].name})`;

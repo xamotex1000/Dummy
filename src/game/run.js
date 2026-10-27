@@ -15,6 +15,9 @@ export class Run {
     this.won = false;
     this.workshopUsed = -1; // act index (with loops) where the workshop was used
     this.weapons = { hands: { level: 1 } };
+    // The machine: traps bolted to mount points, and each trap type's level.
+    this.traps = [];
+    this.trapLevels = {};
 
     // Player modifiers
     this.dmgMult = 1;
@@ -42,6 +45,7 @@ export class Run {
     this.cardCounts = {};
     this.taken = [];
     this.weaponDamage = {};
+    this.trapDamage = {};
     this.lastPrimary = null;
     this.totals = { damage: 0, kills: 0, severs: 0, cleared: 0, bonuses: 0, reactions: 0 };
   }
@@ -73,6 +77,21 @@ export class Run {
 
   level(id) {
     return this.weapons[id]?.level ?? 0;
+  }
+
+  trapLevel(id) {
+    return this.trapLevels[id] ?? 0;
+  }
+
+  trapAt(mountId) {
+    return this.traps.find((t) => t.mount === mountId) ?? null;
+  }
+
+  // Bolt a trap onto a mount, replacing whatever was there.
+  installTrap(id, mountId) {
+    this.traps = this.traps.filter((t) => t.mount !== mountId);
+    this.traps.push({ id, mount: mountId });
+    if (!this.trapLevels[id]) this.trapLevels[id] = 1;
   }
 
   // The owned weapon that has dealt the most damage this run.
