@@ -7,6 +7,7 @@ import { drawWeaponIcon } from './icons.js';
 import { WEAPONS } from './weapons.js';
 import { describeProgress, primaryProgress } from './objectives.js';
 import { VARIANTS, TWISTS } from './variants.js';
+import { TRAPS, TRAP_ORDER, drawTrapIcon } from './traps.js';
 import { C, F, font } from './theme.js';
 
 function setSpacing(ctx, px) {
@@ -117,6 +118,7 @@ export class Hud {
       this.renderHint(ctx);
     }
     this.renderCombo(ctx);
+    this.renderChain(ctx);
   }
 
   // ------------------------------------------------------------ shared bits
@@ -406,8 +408,32 @@ export class Hud {
       y += 19;
     }
 
-    // Cards taken this run, if there's room above the footer.
+    // The machine: installed traps by type.
     const run = sc.run;
+    const types = TRAP_ORDER.filter((id) => run.traps.some((t) => t.id === id));
+    if (types.length && y + 40 < L.h - footer) {
+      y += 24;
+      label(ctx, 'MACHINE', pad, y, C.muted);
+      y += 8;
+      for (const id of types) {
+        if (y + 24 > L.h - footer) break;
+        const count = run.traps.filter((t) => t.id === id).length;
+        drawTrapIcon(ctx, id, pad + 12, y + 12, 22);
+        ctx.font = font(16, F.body, 700);
+        ctx.textAlign = 'left';
+        ctx.fillStyle = C.paper;
+        ctx.fillText(count > 1 ? `${TRAPS[id].name} x${count}` : TRAPS[id].name, pad + 32, y + 18, inner - 80);
+        for (let k = 0; k < run.trapLevel(id); k++) {
+          ctx.fillStyle = C.gold;
+          ctx.beginPath();
+          ctx.arc(pad + inner - 2 - k * 7, y + 12, 2.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        y += 26;
+      }
+    }
+
+    // Cards taken this run, if there's room above the footer.
     if (run.taken.length && y + 60 < L.h - footer) {
       y += 24;
       label(ctx, 'THIS RUN', pad, y, C.muted);
@@ -591,6 +617,30 @@ export class Hud {
     ctx.fillText(this.hint.text, L.w / 2, y + 15, w - 20);
     ctx.textBaseline = 'alphabetic';
     ctx.globalAlpha = 1;
+  }
+
+  // The chain multiplier, top right of the arena.
+  renderChain(ctx) {
+    const sc = this.sc;
+    const n = sc.chainCount;
+    if (n < 2 || sc.state !== 'playing') return;
+    const A = this.L.arena;
+    const x = A.x + A.w - 16;
+    const y = A.y + 38;
+    ctx.textAlign = 'right';
+    ctx.font = font(26 + Math.min(14, n * 2), F.display, 400);
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(14,17,13,0.85)';
+    const label = `CHAIN x${n}`;
+    ctx.strokeText(label, x, y);
+    ctx.fillStyle = n >= 5 ? C.accent : n >= 3 ? C.gold : C.paper;
+    ctx.fillText(label, x, y);
+    ctx.font = font(15, F.body, 700);
+    const sub = `+${Math.round(sc.chainBonus() * 100)}% to everything`;
+    ctx.strokeText(sub, x, y + 20);
+    ctx.fillStyle = C.paper;
+    ctx.fillText(sub, x, y + 20);
   }
 
   renderCombo(ctx) {

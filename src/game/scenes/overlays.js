@@ -12,6 +12,7 @@ import { drawOffer, takeCard, KIND_LABEL } from '../cards.js';
 import { REWARD_LABEL } from '../objectives.js';
 import { VARIANTS, ACTS, TWISTS, FLOORS_PER_ACT } from '../variants.js';
 import { REACTIONS, REACTION_IDS } from '../reactions.js';
+import { TRAPS, mountPoints, createTrap, drawTrapIcon, SURFACE_LABEL } from '../traps.js';
 import { C, F, font } from '../theme.js';
 
 // ---------------------------------------------------------------- helpers
@@ -134,7 +135,7 @@ function hit(b, x, y) {
 
 const pulse = (t) => 0.55 + 0.45 * Math.sin(t * 4);
 
-const PITCH = 'Fight through three acts of test dummies. Pick your route between floors, draft weapons and mods, and combine fire, ice, shocks, nails and blasts into reactions. Miss a deadline and the run is over.';
+const PITCH = 'Build a machine of traps around a test dummy and set it loose. Pick your route through three acts, draft weapons, traps and mods, and chain fire, ice, shocks, nails and blasts into reactions. Miss a deadline and the run is over.';
 
 // Header colors per ticket type.
 const TYPE_TONE = {
@@ -579,7 +580,9 @@ export class CardOverlay extends Overlay {
       if (card.kind === 'weapon') play.selectWeapon(card.icon);
     }
     play.hud.layout();
-    this.close(() => this.onDone?.());
+    // A trap still needs a spot in the arena before we move on.
+    if (card?.kind === 'trap') this.close(() => play.engine.push(new PlaceOverlay(play, card.trap, () => this.onDone?.())));
+    else this.close(() => this.onDone?.());
   }
 
   layoutCards() {
@@ -719,8 +722,9 @@ function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = fa
     roundRectPath(ctx, cx - size / 2, cy - size / 2, size, size, 10);
     ctx.fillStyle = C.ink;
     ctx.fill();
-    if (card.icon) {
-      drawWeaponIcon(ctx, card.icon, cx, cy - (card.badge ? 6 : 0), size * 0.62);
+    if (card.icon || card.trapIcon) {
+      if (card.icon) drawWeaponIcon(ctx, card.icon, cx, cy - (card.badge ? 6 : 0), size * 0.62);
+      else drawTrapIcon(ctx, card.trapIcon, cx, cy - (card.badge ? 6 : 0), size * 0.62);
       if (card.badge) text(ctx, card.badge, cx, cy + size / 2 - 8, 12, { weight: 700, color: C.gold, align: 'center' });
     } else {
       const fs = clamp(size * 0.3, 14, 30) * (card.badge.length > 4 ? 0.75 : 1);
@@ -1127,6 +1131,135 @@ export class VictoryOverlay extends Overlay {
     ctx.stroke();
     text(ctx, 'NEW RUN', this.fresh.x + this.fresh.w / 2, this.fresh.y + this.fresh.h / 2 + 1, 16, { family: F.display, weight: 400, color: C.paperInk, align: 'center', baseline: 'middle' });
     stampMark(ctx, 'APPROVED', rx - 70, y + 22, C.ink, this.t - 0.25);
+    ctx.restore();
+  }
+}
+
+// ------------------------------------------------------------- placement
+
+// Pick a mount point for a new trap. The arena stays visible so you can see
+// how it fits with the rest of the machine; hovering shows a preview.
+export class PlaceOverlay extends Overlay {
+  constructor(play, trapId, onDone) {
+    super(play);
+    this.trapId = trapId;
+    this.def = TRAPS[trapId];
+    this.onDone = onDone;
+    this.marks = [];
+    this.ghost = createTrap(trapId, null, Math.max(1, play.run.trapLevel(trapId)));
+    this.skip = { x: 0, y: 0, w: 0, h: 40, onClick: () => this.close(this.onDone) };
+    for (let i = 1; i <= 8; i++) this.keys[String(i)] = () => this.marks.filter((m) => m.ok)[i - 1]?.onClick();
+  }
+
+  layoutMarks() {
+    const play = this.play;
+    const L = play.layout;
+    const old = this.marks;
+    this.marks = mountPoints(play.bounds).map((m, i) => {
+      const wx = m.x + m.nx * 34, wy = m.y + m.ny * 34;
+      const sx = L.arena.x + wx * L.k, sy = L.arena.y + wy * L.k;
+      const ok = this.def.surfaces.includes(m.surface);
+      return Object.assign(old[i] ?? {}, {
+        mount: m, ok, sx, sy, x: sx - 24, y: sy - 24, w: 48, h: 48,
+        occupant: play.run.trapAt(m.id),
+        onClick: () => this.place(m),
+      });
+    });
+    const R = this.frame;
+    const w = Math.min(240, R.w - 32);
+    const A = this.play.layout.arena;
+    Object.assign(this.skip, { x: A.x + (A.w - w) / 2, y: A.y + A.h * 0.55 + 58, w });
+  }
+
+  place(m) {
+    const play = this.play;
+    play.run.installTrap(this.trapId, m.id);
+    play.rebuildMachine();
+    play.sfx.install();
+    play.fxDust(m.x + m.nx * 20, m.y + m.ny * 20, 10);
+    this.close(this.onDone);
+  }
+
+  update(dt, isTop) {
+    this.layoutMarks();
+    this.buttons = [...this.marks.filter((m) => m.ok), this.skip];
+    super.update(dt, isTop);
+  }
+
+  render(ctx) {
+    const play = this.play;
+    const L = this.L;
+    const R = this.frame;
+    const a = this.appear;
+    this.layoutMarks();
+    dim(ctx, L.arena, a * 0.45);
+
+    // Preview the trap on the hovered mount, in world space.
+    const hover = this.marks.find((m) => m.hover && m.ok);
+    if (hover) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(L.arena.x, L.arena.y, L.arena.w, L.arena.h);
+      ctx.clip();
+      ctx.translate(L.arena.x, L.arena.y);
+      ctx.scale(L.k, L.k);
+      ctx.globalAlpha = 0.7 * a;
+      this.ghost.m = hover.mount;
+      this.def.draw(this.ghost, ctx, play, 'back');
+      this.def.draw(this.ghost, ctx, play, 'front');
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.globalAlpha = a;
+    let n = 0;
+    for (const m of this.marks) {
+      if (!m.ok) {
+        ctx.fillStyle = 'rgba(239,234,223,0.25)';
+        ctx.beginPath();
+        ctx.arc(m.sx, m.sy, 6, 0, Math.PI * 2);
+        ctx.fill();
+        continue;
+      }
+      n++;
+      const pulse = 1 + 0.08 * Math.sin(this.t * 6 + n);
+      ctx.beginPath();
+      ctx.arc(m.sx, m.sy, 20 * pulse, 0, Math.PI * 2);
+      ctx.fillStyle = m.hover ? C.accent : 'rgba(22,25,21,0.85)';
+      ctx.fill();
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = m.occupant ? C.gold : C.accent;
+      ctx.stroke();
+      if (m.occupant) {
+        drawTrapIcon(ctx, m.occupant.id, m.sx, m.sy, 26, { alpha: 0.9 });
+        text(ctx, 'SWAP', m.sx, m.sy + 36, 12, { weight: 700, color: C.gold, align: 'center' });
+      } else {
+        ctx.strokeStyle = C.paper;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(m.sx - 8, m.sy);
+        ctx.lineTo(m.sx + 8, m.sy);
+        ctx.moveTo(m.sx, m.sy - 8);
+        ctx.lineTo(m.sx, m.sy + 8);
+        ctx.stroke();
+      }
+      if (this.fine) keycap(ctx, String(n), m.sx + 18, m.sy - 20, { dark: true });
+    }
+
+    // Header band across the middle of the arena, clear of the mounts.
+    const cx = R.x + R.w / 2;
+    const top = L.arena.y + L.arena.h * 0.55 - 48;
+    ctx.fillStyle = 'rgba(14,17,13,0.85)';
+    ctx.fillRect(L.arena.x, top, L.arena.w, 96);
+    const title = `INSTALL: ${this.def.name.toUpperCase()}`;
+    const size = clamp(R.w * 0.045, 20, 30);
+    ctx.font = font(size, F.display, 400);
+    const tw = Math.min(ctx.measureText(title).width, R.w - 110);
+    drawTrapIcon(ctx, this.trapId, cx - tw / 2 - 10, top + 33, 36);
+    text(ctx, title, cx + 18, top + 44, size, { family: F.display, weight: 400, color: C.paper, align: 'center', maxWidth: R.w - 110 });
+    const where = this.def.surfaces.map((x) => SURFACE_LABEL[x]).join(', ');
+    text(ctx, `Mounts on the ${where}. ${hover?.occupant ? `Replaces the ${TRAPS[hover.occupant.id].name}.` : 'Pick a spot.'}`, cx, top + 72, 16, { weight: 500, color: C.paperDim, align: 'center', maxWidth: R.w - 32 });
+    this.drawButton(ctx, this.skip, 'SKIP THIS TRAP', { primary: false });
     ctx.restore();
   }
 }

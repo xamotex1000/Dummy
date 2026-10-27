@@ -6,7 +6,7 @@ import { REACTIONS, loadDiscovered, saveDiscovered } from './reactions.js';
 import { C } from './theme.js';
 
 // Hits that count as blunt for shattering frozen parts.
-const BLUNT = new Set(['hands', 'bat', 'anvil']);
+const BLUNT = new Set(['hands', 'bat', 'anvil', 'trap:spinner', 'trap:crusher', 'trap:spring']);
 
 export class StatusSystem {
   constructor(sc) {

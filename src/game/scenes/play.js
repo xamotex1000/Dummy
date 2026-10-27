@@ -12,11 +12,12 @@ import { clamp } from '../../engine/math.js';
 import { Dummy } from '../dummy.js';
 import { WEAPONS, weaponDamageMult } from '../weapons.js';
 import { makeRound, makeRoute, primaryProgress, secondaryEvent, secondaryComplete } from '../objectives.js';
-import { starterOffer } from '../cards.js';
+import { starterOffer, starterTrapOffer } from '../cards.js';
 import { Run } from '../run.js';
 import { VARIANTS, ACTS } from '../variants.js';
 import { StatusSystem } from '../statuses.js';
 import { Entrance } from '../entrances.js';
+import { TRAPS, createTrap, mountById } from '../traps.js';
 import {
   spawnGrenade, spawnAnvil, spawnVortex, updateProjectiles, drawProjectile,
   projectileImpact, projectileContact, activeVortexes, collapseVortex,
@@ -52,7 +53,11 @@ function save(key, v) {
   }
 }
 
-const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0 });
+const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0, trapDamage: 0 });
+
+// Distinct damage sources within this window stack the chain multiplier.
+const CHAIN_WINDOW = 2;
+const CHAIN_STEP = 0.15;
 
 export class PlayScene {
   constructor(engine) {
@@ -93,6 +98,8 @@ export class PlayScene {
     this.theme = 'cell';
     this.entrance = new Entrance(this, 'cell');
     this.awaitingEntry = false; // the clock waits until the first dummy is in
+    this.machine = []; // live trap instances built from run.traps
+    this.chain = new Map(); // damage source -> last time it landed a hit
     this.bestDepth = load('dummy-run-best');
     this.wins = load('dummy-run-wins');
     this.layout = computeLayout(engine.width, engine.height);
@@ -156,6 +163,7 @@ export class PlayScene {
   quitToTitle() {
     for (const s of this.engine.scenes.slice()) if (s !== this) this.engine.remove(s);
     this.run = null;
+    this.machine = [];
     this.round = null;
     this.hud.layout();
     this.showTitle();
@@ -185,8 +193,36 @@ export class PlayScene {
       title: 'CHOOSE YOUR TOOL',
       subtitle: 'Pick the weapon you start with. Your hands are always free.',
       rerolls: false,
-      onDone: () => this.showAct(),
+      onDone: () => this.engine.push(new CardOverlay(this, {
+        offer: starterTrapOffer(this.rng),
+        title: 'INSTALL YOUR FIRST TRAP',
+        subtitle: 'Traps run on their own. You will place it on the next screen.',
+        rerolls: false,
+        onDone: () => this.showAct(),
+      })),
     }));
+  }
+
+  rebuildMachine() {
+    this.machine = this.run ? this.run.traps.map((t) => createTrap(t.id, t.mount, this.run.trapLevel(t.id))) : [];
+    this.syncMachine();
+  }
+
+  // Mount positions follow the arena size; levels follow upgrades.
+  syncMachine() {
+    for (const t of this.machine) {
+      t.m = mountById(this.bounds, t.mountId);
+      t.level = this.run.trapLevel(t.id);
+    }
+  }
+
+  // How many different things have hit something in the last couple of seconds.
+  get chainCount() {
+    return this.chain.size;
+  }
+
+  chainBonus() {
+    return Math.max(0, this.chainCount - 1) * CHAIN_STEP;
   }
 
   showAct() {
@@ -223,6 +259,8 @@ export class PlayScene {
     this.round = round;
     this.run.lastPrimary = round.primary.type;
     this.stats = newStats();
+    this.chain.clear();
+    this.rebuildMachine();
     this.timeLeft = round.time;
     this.combo = { count: 0, t: 0 };
     this.stamp = null;
@@ -398,6 +436,12 @@ export class PlayScene {
     return this.run ? this.run.level(id) : 1;
   }
 
+  // Level of a weapon, or of a trap type for 'trap:<id>' sources.
+  sourceLevel(id) {
+    if (id.startsWith('trap:')) return this.run ? this.run.trapLevel(id.slice(5)) : 1;
+    return this.level(id);
+  }
+
   ready(key, cooldown) {
     if ((this.cd[key] ?? -1) > this.time) return false;
     this.cd[key] = this.time + cooldown;
@@ -529,8 +573,9 @@ export class PlayScene {
     if (!dummy.alive || base <= 0) return 0;
     const run = this.run;
     const env = ENV.has(weaponId);
+    const trap = weaponId.startsWith('trap:');
     const sustained = kind === 'dot' || kind === 'grind';
-    let amt = base * weaponDamageMult(this.level(weaponId));
+    let amt = base * weaponDamageMult(this.sourceLevel(weaponId));
     let crit = false;
     if (kind !== 'reaction' && !sustained) {
       const mod = this.status.onHit(dummy, seg, weaponId, kind);
@@ -555,6 +600,11 @@ export class PlayScene {
         amt *= 1 + this.comboBonus();
       }
       if (run.adrenaline && this.state === 'playing' && this.timeLeft <= 10) amt *= 2;
+      // Chain: every distinct source that hit in the last couple of seconds
+      // adds to everything. One weapon alone stays flat; a busy machine soars.
+      if (!sustained) this.chain.set(kind === 'reaction' ? 'reaction' : weaponId, this.time);
+      for (const [k, t] of this.chain) if (this.time - t > CHAIN_WINDOW) this.chain.delete(k);
+      amt *= 1 + this.chainBonus();
     }
 
     const res = dummy.applyDamage(seg, amt, { limbMult, pierce });
@@ -587,8 +637,13 @@ export class PlayScene {
       if (kind === 'impact') st.impact += dealt;
       if (!sustained) st.maxHit = Math.max(st.maxHit, dealt);
       run.totals.damage += dealt;
-      run.weaponDamage[weaponId] = (run.weaponDamage[weaponId] ?? 0) + dealt;
-      this.bonusEvent('damage', { group: seg.group, weapon: weaponId, kind });
+      if (trap) {
+        st.trapDamage += dealt;
+        run.trapDamage[weaponId] = (run.trapDamage[weaponId] ?? 0) + dealt;
+      } else {
+        run.weaponDamage[weaponId] = (run.weaponDamage[weaponId] ?? 0) + dealt;
+      }
+      this.bonusEvent('damage', { group: seg.group, weapon: weaponId, kind, trap });
     }
     if (res.severed) this.onSever(dummy, res.severed);
     if (res.killed) this.onKill(dummy, weaponId);
@@ -850,7 +905,11 @@ export class PlayScene {
       this.pointerOwner = null;
     }
     this.updateGrab();
-    if (this.state === 'playing') this.updateVent(dt);
+    if (this.state === 'playing') {
+      this.updateVent(dt);
+      this.syncMachine();
+      for (const t of this.machine) TRAPS[t.id].update(t, this, dt);
+    }
 
     for (const d of this.dummies) this.status.tick(d, dt);
     this.world.step(dt);
@@ -1114,6 +1173,7 @@ export class PlayScene {
 
     this.renderVent(ctx);
     this.entrance.draw(ctx, 'back');
+    this.drawMachine(ctx, 'back');
     for (const d of this.dummies) {
       const pelvis = d.points.pelvis;
       const h = clamp((B.bottom - pelvis.y) / 400, 0, 1);
@@ -1124,6 +1184,7 @@ export class PlayScene {
     }
     for (const d of this.dummies) d.draw(ctx);
     for (const pr of this.projectiles) drawProjectile(this, ctx, pr);
+    this.drawMachine(ctx, 'front');
     this.entrance.draw(ctx, 'front');
     this.renderTrail(ctx);
     this.renderBeam(ctx);
@@ -1134,6 +1195,14 @@ export class PlayScene {
 
     this.renderStamp(ctx);
     this.hud.render(ctx);
+  }
+
+  drawMachine(ctx, layer) {
+    if (!this.run || this.state === 'title') return;
+    for (const t of this.machine) {
+      if (!t.m) t.m = mountById(this.bounds, t.mountId);
+      TRAPS[t.id].draw(t, ctx, this, layer);
+    }
   }
 
   renderVent(ctx) {

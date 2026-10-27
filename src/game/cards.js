@@ -2,6 +2,7 @@
 // the rules of the run. Offers are drawn by rarity weight.
 
 import { WEAPONS, WEAPON_ORDER, STARTERS, nextUpgrade } from './weapons.js';
+import { TRAPS, TRAP_ORDER, STARTER_TRAPS, nextTrapUpgrade } from './traps.js';
 
 export const RARITY_WEIGHT = {
   normal: { common: 60, rare: 30, epic: 10 },
@@ -10,6 +11,7 @@ export const RARITY_WEIGHT = {
 
 export const KIND_LABEL = {
   weapon: 'New weapon',
+  trap: 'New trap',
   upgrade: 'Upgrade',
   dummy: 'Dummy mod',
   perk: 'Perk',
@@ -69,11 +71,41 @@ function weaponCards(run) {
   return cards;
 }
 
+export function trapCard(id, weight = 1) {
+  const def = TRAPS[id];
+  // Where it can go, shown under the icon.
+  const where = def.surfaces.map((x) => (x === 'ceiling' ? 'CEIL' : x.toUpperCase())).join(' · ');
+  return {
+    id: 'trap_' + id, kind: 'trap', rarity: def.rarity, trapIcon: id, trap: id,
+    name: def.name, desc: def.desc, badge: where, weight,
+    // Installing happens in the placement step; picking just takes it.
+    apply: () => {},
+  };
+}
+
+function trapCards(run) {
+  const cards = [];
+  for (const id of TRAP_ORDER) {
+    const copies = run.traps.filter((t) => t.id === id).length;
+    // The machine is the point: traps show up often while it's small.
+    if (copies < 3) cards.push(trapCard(id, run.traps.length < 4 ? 2 : 1));
+    const level = run.trapLevel(id);
+    const up = level ? nextTrapUpgrade(id, level) : null;
+    if (!up) continue;
+    cards.push({
+      id: 'tup_' + id, kind: 'upgrade', rarity: level >= 2 ? 'rare' : 'common', trapIcon: id,
+      name: `${TRAPS[id].name}: ${up.name}`, desc: up.desc, badge: `LV ${level + 1}`,
+      apply: (r) => { r.trapLevels[id] += 1; },
+    });
+  }
+  return cards;
+}
+
 export function availableCards(run) {
   const statics = STATIC_CARDS.filter((c) => (run.cardCounts[c.id] ?? 0) < c.max);
   // Blood Pact can't push rounds below 20 seconds.
   const filtered = statics.filter((c) => c.id !== 'bloodpact' || 40 + run.timeBonus - 8 >= 20);
-  return [...weaponCards(run), ...filtered];
+  return [...weaponCards(run), ...trapCards(run), ...filtered];
 }
 
 // `kinds` limits the offer (e.g. ['weapon'] for a crate, ['upgrade'] for the
@@ -91,6 +123,11 @@ export function drawOffer(run, rng, { bonus = false, exclude = [], kinds = null,
 // Three starting weapons to choose from at the beginning of a run.
 export function starterOffer(rng) {
   return rng.weightedSample(STARTERS, 3, () => 1).map((id) => unlockCard(id));
+}
+
+// And three traps to start the machine with.
+export function starterTrapOffer(rng) {
+  return rng.weightedSample(STARTER_TRAPS, 3, () => 1).map((id) => trapCard(id));
 }
 
 export function takeCard(run, card) {
