@@ -1,5 +1,6 @@
 // Palette and type. The look: a padded test cell, a burlap dummy, and a
-// work-order clipboard for the UI.
+// crash test report for the UI: form fields, typed values, yellow-and-black
+// calibration targets and injury ratings.
 
 import { hexToRgb } from '../engine/math.js';
 
@@ -40,6 +41,15 @@ export const C = {
   wood: '#c8874a',
   olive: '#5d7a3a',
   rarity: { common: '#8fa58a', rare: '#3d8bff', epic: '#b25cff' },
+  // Report sheets.
+  formInk: '#24211c',
+  formMuted: '#7a7263',
+  rule: '#b4ab99',
+  ruleSoft: '#ddd6c6',
+  pen: '#c8283a',
+  ctYellow: '#f2c200',
+  // Injury ratings, best to worst. On this test, worst is the goal.
+  rate: ['#3f9a4e', '#e0bc22', '#e8862a', '#cf3427'],
 };
 
 export const RGB = {
@@ -55,6 +65,7 @@ export const RGB = {
 export const F = {
   display: '"Bowlby One SC", "Arial Black", Impact, sans-serif',
   body: '"Barlow Condensed", "Arial Narrow", "Roboto Condensed", system-ui, sans-serif',
+  mono: '"IBM Plex Mono", "Courier New", ui-monospace, monospace',
 };
 
 export const font = (size, family = F.body, weight = 600) => `${weight} ${Math.round(size)}px ${family}`;

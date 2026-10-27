@@ -53,7 +53,9 @@ function save(key, v) {
   }
 }
 
-const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0, trapDamage: 0 });
+// Per-region damage and a damage trace feed the results sheet.
+const newStats = () => ({ damage: 0, kills: 0, severs: 0, impact: 0, maxHit: 0, reactions: 0, trapDamage: 0, elapsed: 0, regions: {}, trace: [], traceAcc: 0, traceLast: 0 });
+const TRACE_STEP = 0.25;
 
 // Distinct damage sources within this window stack the chain multiplier.
 const CHAIN_WINDOW = 2;
@@ -636,6 +638,8 @@ export class PlayScene {
       st.damage += dealt;
       if (kind === 'impact') st.impact += dealt;
       if (!sustained) st.maxHit = Math.max(st.maxHit, dealt);
+      const region = seg.limb ?? seg.group;
+      st.regions[region] = (st.regions[region] ?? 0) + dealt;
       run.totals.damage += dealt;
       if (trap) {
         st.trapDamage += dealt;
@@ -894,7 +898,17 @@ export class PlayScene {
   update(dt, isTop) {
     this.time += dt;
     this.syncPointer();
-    if (this.state === 'playing' && !this.awaitingEntry) this.timeLeft -= dt;
+    if (this.state === 'playing' && !this.awaitingEntry) {
+      this.timeLeft -= dt;
+      const st = this.stats;
+      st.elapsed += dt;
+      st.traceAcc += dt;
+      if (st.traceAcc >= TRACE_STEP) {
+        st.traceAcc -= TRACE_STEP;
+        st.trace.push(st.damage - st.traceLast);
+        st.traceLast = st.damage;
+      }
+    }
     if (this.state === 'playing' && isTop) {
       // Move the held weapon first so a press fires from where it is now.
       this.updateHeld(dt);
