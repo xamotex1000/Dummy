@@ -38,17 +38,25 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 The gear on the pause sheet (or the title screen, or the S key) opens the facility settings. Both settings are saved in the browser.
 
 - **Gore** (on by default). Hits splash blood that pools on the floor, splats on the back wall and runs down the walls. Torn limbs pump from both ends, and destroyed dummies burst. Stains last for the round. Off swaps all of it for stuffing, and bruises turn to grime.
-- **Rogue-lite mode** (off by default). Off, it's a straight roguelike: every run starts from scratch. On, every run that ends pays out credits: 10 per floor cleared, 5 per secondary met, 2 per reaction, and 100 for finishing the series. Spend them in **Facility Upgrades** (from settings, the title screen or the run-over sheet) on permanent upgrades that apply when a new run starts:
+- **Rogue-lite mode** (off by default). Off, it's a straight roguelike: every run starts from scratch. On, every run that ends pays out credits: 10 per floor cleared, 5 per secondary met, 2 per reaction, and 100 for finishing the series. You spend them on the progression tree (below).
 
-| Upgrade | Effect | Cost |
-|---|---|---|
-| Research Funding | +1 starting reroll per level | 40 / 80 / 140 |
-| Overtime Clause | +3 s on every floor per level | 50 / 100 / 160 |
-| Calibrated Tools | starting weapon begins at level 2 | 90 |
-| Pre-Wired Cell | first trap begins at level 2 | 90 |
-| Longer Shortlist | one more card on every pick | 180 |
-| Insurance Policy | start with a Second Wind | 160 |
-| Salvage Rights | +25% credits per level | 70 / 150 |
+## The progression tree
+
+In rogue-lite mode, credits buy nodes on the **Facility Development Plan**, a tree of 54 upgrades around one starting node, the Facility Charter. Open it from settings, the title screen (U) or the run-over sheet. Upgrades apply when a new run starts.
+
+- **Six branches** go out from the charter in every direction: Funding (rerolls, credits), Clock (time, Adrenaline, Combo), Arsenal (weapon damage and level, crits, a second starting weapon), Machine (trap damage and level, chains, a second starting trap), Subject (weaker dummies, limbs, splitting) and Lab (status effects, reactions, Second Wind, more card choices).
+- Each branch splits in two at ring 3 and joins again at a **keystone**: Blank Cheque, Overclocked, Master Armorer, Full Automation, Defective Batch and Chain Reaction.
+- **Bridges** link neighbouring branches at ring 3.7. An outer ring of six **directorate** upgrades joins the keystones.
+- Costs rise outward: 25, 50, 90, 140 and 240 credits per ring, 110 for a bridge and 380 for a directorate upgrade.
+- **Undiscovered upgrades are hidden.** You see the nodes you own and the ones next to them, which you can buy. One step further, nodes show only as a "?" marker. Anything beyond that isn't drawn at all.
+- Drag to pan, scroll or use + / - to zoom, C to recenter, N to jump to the next node you can buy, and B or Enter to buy it. Tap a node to inspect it. On desktop the side panel totals what your upgrades add up to.
+- Purchases from the earlier flat upgrade shop are refunded as credits.
+
+## Saves and records
+
+- **Run saves.** A run saves itself between floors: on the act screen and the route choice. If you close the tab or quit to the title, the title offers **CONTINUE**, which resumes at that floor. NEW RUN asks for a second tap before discarding the save. A run that ends deletes its save.
+- **High scores.** Every run that ends goes on a top-ten table (RECORDS on the title or the run-over sheet). Scoring: 1,000 per floor, 250 per secondary, 50 per reaction, 20 per dummy, damage / 10, and 5,000 for certifying the series. A won run that carries on into endless keeps one entry, updated when it ends.
+- Settings, rogue-lite progress, saves and records all live in the browser's local storage.
 
 ## The cardiac monitor
 
@@ -214,7 +222,10 @@ src/
     cards.js         card pool, rarity weights, offers
     run.js           state that persists across a run
     settings.js      saved settings (gore, rogue-lite)
-    meta.js          rogue-lite credits and facility upgrades
+    tree.js          the rogue-lite progression tree: nodes, layout, links
+    meta.js          rogue-lite credits and owned tree nodes
+    save.js          run saves between floors
+    scores.js        the high score table
     gore.js          blood droplets, stains and stump spurts
     heart.js         the subject's heart: rate, fibrillation, flatlines
     hud.js           desktop sidebar, or a top strip + weapon rack on phones
@@ -223,7 +234,10 @@ src/
     icons.js         vector weapon icons and grip-origin held weapon sprites
     sfx.js, theme.js
     scenes/play.js   the arena: damage pipeline, physics callbacks, run flow, act hazards
-    scenes/overlays.js  report-sheet UI: title, routes, acts, test order, results, cards, pause + codex, run end
+    scenes/sheet.js     report paper: primitives, the printer, the Overlay base class
+    scenes/overlays.js  title, routes, acts, test order, results, cards, pause + codex, run end, settings
+    scenes/tree-overlay.js  the progression tree screen
+    scenes/records.js   the high score table screen
   main.js
 ```
 
