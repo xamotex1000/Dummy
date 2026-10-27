@@ -65,12 +65,12 @@ const BRANCH_NODES = {
     ['5', 'Full Automation', 'Traps deal +40% damage, your weapons 15% less.', (r) => { r.trapMult *= 1.4; r.weaponMult *= 0.85; }],
   ],
   subject: [
-    ['1', 'Cheap Stitching', 'Dummies have 5% less health.', (r) => { r.dummyHpMult *= 0.95; }],
-    ['2', 'Brittle Seams', 'Limbs tear off 15% more easily.', (r) => { r.limbFragility *= 1.15; }],
+    ['1', 'Budget Vinyl', 'Dummies have 5% less health.', (r) => { r.dummyHpMult *= 0.95; }],
+    ['2', 'Brittle Joints', 'Limbs tear off 15% more easily.', (r) => { r.limbFragility *= 1.15; }],
     ['3a', 'Glass Jaw', 'Head hits deal +15% damage.', (r) => { r.headMult *= 1.15; }],
-    ['3b', 'Thin Burlap', 'Dummies have 8% less health.', (r) => { r.dummyHpMult *= 0.92; }],
+    ['3b', 'Thin Vinyl', 'Dummies have 8% less health.', (r) => { r.dummyHpMult *= 0.92; }],
     ['4a', 'Hydra Sample', '+10% chance a destroyed dummy comes back as two.', (r) => { r.hydraChance += 0.1; }],
-    ['4b', 'Loose Joints', 'Limbs tear off 20% more easily.', (r) => { r.limbFragility *= 1.2; }],
+    ['4b', 'Stripped Threads', 'Limbs tear off 20% more easily.', (r) => { r.limbFragility *= 1.2; }],
     ['5', 'Defective Batch', 'Destroyed dummies explode.', perk('shatter', 'shatter')],
   ],
   lab: [

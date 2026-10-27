@@ -1,11 +1,13 @@
-// The test dummy: a 15-point Verlet ragdoll drawn as burlap capsules.
+// The test dummy: a 15-point Verlet ragdoll drawn as a crash test dummy, in
+// yellow vinyl with hinge joints, calibration targets and a rubber neck.
 // Damage is tracked per segment and per limb; limbs tear off when their
-// stitching runs out, and the whole thing bursts at the seams on death.
+// joint gives, and the whole thing comes apart at every joint on death.
 
 import { Point, Stick } from '../engine/physics.js';
 import { capsulePath } from '../engine/renderer.js';
 import { closestOnSegment, segmentDistance, clamp, hexToRgb } from '../engine/math.js';
-import { C, RGB } from './theme.js';
+import { C, RGB, F, font } from './theme.js';
+import { drawTarget as target } from './icons.js';
 import { VARIANTS } from './variants.js';
 import { settings } from './settings.js';
 
@@ -46,7 +48,7 @@ export class Dummy {
     this.lastHitT = -99;
     this.statuses = new Map();
     this.sticks = [];
-    this.baseRgb = v.color ? hexToRgb(v.color) : this.boss ? RGB.burlapBoss : RGB.burlap;
+    this.baseRgb = v.color ? hexToRgb(v.color) : this.boss ? RGB.dummyBoss : RGB.dummy;
 
     const s = scale;
     const group = 'dummy' + this.id;
@@ -275,7 +277,7 @@ export class Dummy {
     for (const st of limb.root) st.broken = true;
   }
 
-  // Bursts at the seams: every joint between body parts lets go.
+  // Comes apart: every joint between body parts lets go.
   die(dt) {
     this.alive = false;
     this.deadT = 0;
@@ -325,7 +327,10 @@ export class Dummy {
         if (this.armor?.torso > 0) this.drawVest(ctx, seg);
       }
     }
+    this.drawExtremities(ctx);
+    this.drawJoints(ctx);
     this.drawSockets(ctx);
+    if (this.alive) this.drawNeck(ctx);
     this.drawHead(ctx, this.segMap.head);
     this.drawNails(ctx);
     if (this.shockT > 0 && this.alive) this.drawArcs(ctx);
@@ -333,7 +338,7 @@ export class Dummy {
     if (this.alive && this.hp < this.maxHp) this.drawHealth(ctx);
   }
 
-  // Base burlap, then bruising, scorching, ice, electricity and hit flash.
+  // Yellow vinyl, then damage, scorching, ice, electricity and hit flash.
   segColor(seg) {
     const mix = (c, to, t) => c.map((v, i) => v + (to[i] - v) * t);
     let c = mix(this.baseRgb, settings.gore ? RGB.bruise : RGB.grime, clamp(seg.dmg / (this.maxHp * 0.45), 0, 1) * 0.8);
@@ -345,22 +350,28 @@ export class Dummy {
   }
 
   drawSeg(ctx, seg) {
+    const s = this.s;
     capsulePath(ctx, seg.a.x, seg.a.y, seg.b.x, seg.b.y, seg.r);
     ctx.fillStyle = this.segColor(seg);
     ctx.fill();
-    ctx.lineWidth = 2.5 * this.s;
-    ctx.strokeStyle = seg.frozen > 0 ? '#5a8fae' : C.seam;
+    ctx.lineWidth = 2.5 * s;
+    ctx.strokeStyle = seg.frozen > 0 ? '#5a8fae' : C.dummyLine;
     ctx.stroke();
-    if (seg.frozen > 0) {
-      // Frost glints.
-      ctx.strokeStyle = 'rgba(255,255,255,0.8)';
-      ctx.lineWidth = 1.5 * this.s;
+    // A plastic sheen down one side of the limb.
+    const dx = seg.b.x - seg.a.x, dy = seg.b.y - seg.a.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1) {
+      const nx = -dy / len, ny = dx / len;
+      const o = seg.r * 0.45;
+      ctx.strokeStyle = seg.frozen > 0 ? 'rgba(255,255,255,0.8)' : 'rgba(255,255,255,0.38)';
+      ctx.lineWidth = Math.max(1.5, seg.r * 0.28);
       ctx.beginPath();
-      const mx = (seg.a.x + seg.b.x) / 2, my = (seg.a.y + seg.b.y) / 2;
-      ctx.moveTo(mx - seg.r * 0.5, my - seg.r * 0.3);
-      ctx.lineTo(mx + seg.r * 0.2, my - seg.r * 0.6);
+      ctx.moveTo(seg.a.x + dx * 0.2 + nx * o, seg.a.y + dy * 0.2 + ny * o);
+      ctx.lineTo(seg.a.x + dx * 0.8 + nx * o, seg.a.y + dy * 0.8 + ny * o);
       ctx.stroke();
     }
+    // Calibration targets on the thighs, like the real thing.
+    if (seg.name === 'lThigh' || seg.name === 'rThigh') target(ctx, seg.a.x + dx * 0.5, seg.a.y + dy * 0.5, 3.8 * s);
   }
 
   drawVest(ctx, seg) {
@@ -427,67 +438,156 @@ export class Dummy {
     ctx.stroke();
   }
 
+  // The chest: a stencilled number, rib plates, a target over the sternum
+  // and the pelvis plate where the lap belt goes.
   drawTorsoDetail(ctx, seg) {
     const s = this.s;
     const ax = seg.a.x, ay = seg.a.y, bx = seg.b.x, by = seg.b.y;
     const len = Math.hypot(bx - ax, by - ay) || 1;
     const ux = (bx - ax) / len, uy = (by - ay) / len;
     const nx = -uy, ny = ux;
-    ctx.strokeStyle = C.stitch;
+    const at = (t, side = 0) => [ax + (bx - ax) * t + nx * side, ay + (by - ay) * t + ny * side];
+    const w = seg.r * 0.62;
+    ctx.strokeStyle = C.dummyShade;
     ctx.lineWidth = 1.6 * s;
     ctx.beginPath();
-    for (let t = 0.1; t <= 0.95; t += 0.14) {
-      const cx = ax + (bx - ax) * t + nx * 4 * s, cy = ay + (by - ay) * t + ny * 4 * s;
-      ctx.moveTo(cx - nx * 4 * s - ux * 2 * s, cy - ny * 4 * s - uy * 2 * s);
-      ctx.lineTo(cx + nx * 4 * s + ux * 2 * s, cy + ny * 4 * s + uy * 2 * s);
+    for (const t of [0.34, 0.46, 0.58]) {
+      const [cx, cy] = at(t);
+      ctx.moveTo(cx - nx * w, cy - ny * w);
+      ctx.quadraticCurveTo(cx + ux * 3 * s, cy + uy * 3 * s, cx + nx * w, cy + ny * w);
     }
     ctx.stroke();
-    // A little cloth patch over the heart.
-    const px = ax + (bx - ax) * 0.3 - nx * 8 * s, py = ay + (by - ay) * 0.3 - ny * 8 * s;
-    ctx.save();
-    ctx.translate(px, py);
-    ctx.rotate(Math.atan2(uy, ux) - Math.PI / 2);
-    ctx.fillStyle = this.boss ? C.bad : C.accent;
-    ctx.strokeStyle = C.seam;
-    ctx.lineWidth = 1.5 * s;
+    // Pelvis plate.
+    const [px, py] = at(0.86);
+    ctx.strokeStyle = C.joint;
+    ctx.lineWidth = 4 * s;
     ctx.beginPath();
-    ctx.rect(-5 * s, -5 * s, 10 * s, 10 * s);
-    ctx.fill();
-    ctx.setLineDash([2 * s, 2 * s]);
+    ctx.moveTo(px - nx * seg.r * 0.85, py - ny * seg.r * 0.85);
+    ctx.lineTo(px + nx * seg.r * 0.85, py + ny * seg.r * 0.85);
     ctx.stroke();
-    ctx.setLineDash([]);
+    const [tx, ty] = at(0.2, -seg.r * 0.38);
+    target(ctx, tx, ty, 5 * s);
+    // Serial number down the belly.
+    const [sx, sy] = at(0.72);
+    ctx.save();
+    ctx.translate(sx, sy);
+    ctx.rotate(Math.atan2(uy, ux) - Math.PI / 2);
+    ctx.font = font(7.5 * s, F.mono, 700);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = 'rgba(42,38,32,0.75)';
+    ctx.fillText(`CT-${String(this.id % 100).padStart(2, '0')}`, 0, 0);
     ctx.restore();
   }
 
+  // Mitten hands and dark boots.
+  drawExtremities(ctx) {
+    const s = this.s;
+    const P = this.points;
+    ctx.lineWidth = 2 * s;
+    ctx.strokeStyle = C.dummyLine;
+    for (const [hand, seg] of [[P.lHa, this.segMap.lFore], [P.rHa, this.segMap.rFore]]) {
+      ctx.beginPath();
+      ctx.arc(hand.x, hand.y, 6.5 * s, 0, Math.PI * 2);
+      ctx.fillStyle = this.segColor(seg);
+      ctx.fill();
+      ctx.stroke();
+    }
+    for (const [foot, knee] of [[P.lFt, P.lKn], [P.rFt, P.rKn]]) {
+      const a = Math.atan2(foot.y - knee.y, foot.x - knee.x);
+      ctx.beginPath();
+      ctx.ellipse(foot.x, foot.y, 6 * s, 10 * s, a, 0, Math.PI * 2);
+      ctx.fillStyle = '#33373a';
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
+  // Black hinge plates with a bolt at the shoulders, elbows, hips and knees.
+  drawJoints(ctx) {
+    const s = this.s;
+    const P = this.points;
+    const joint = (p, r) => {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+      ctx.fillStyle = C.joint;
+      ctx.fill();
+      ctx.lineWidth = 1.5 * s;
+      ctx.strokeStyle = C.dummyLine;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, r * 0.42, 0, Math.PI * 2);
+      ctx.fillStyle = C.bolt;
+      ctx.fill();
+    };
+    for (const p of [P.lHip, P.rHip, P.lKn, P.rKn]) joint(p, (p === P.lHip || p === P.rHip ? 6 : 5.2) * s);
+    for (const p of [P.lSh, P.rSh, P.lEl, P.rEl]) joint(p, (p === P.lSh || p === P.rSh ? 6 : 5) * s);
+  }
+
+  // Where a limb came off: an empty socket on the body with wires hanging out.
   drawSockets(ctx) {
     const s = this.s;
     const { neck, pelvis } = this.points;
+    const c = this.center();
     const len = Math.hypot(pelvis.x - neck.x, pelvis.y - neck.y) || 1;
     const ux = (pelvis.x - neck.x) / len, uy = (pelvis.y - neck.y) / len;
     const nx = -uy, ny = ux;
-    ctx.fillStyle = C.fluff;
-    ctx.strokeStyle = 'rgba(120,100,70,0.6)';
-    ctx.lineWidth = 1.2 * s;
-    const puff = (x, y, r) => {
+    const socket = (x, y, r) => {
       ctx.beginPath();
       ctx.arc(x, y, r, 0, Math.PI * 2);
-      ctx.arc(x + r * 0.7, y - r * 0.4, r * 0.7, 0, Math.PI * 2);
-      ctx.arc(x - r * 0.6, y + r * 0.3, r * 0.6, 0, Math.PI * 2);
+      ctx.fillStyle = '#1b1e20';
       ctx.fill();
+      ctx.lineWidth = 2 * s;
+      ctx.strokeStyle = C.bolt;
       ctx.stroke();
+      // Two wires, pointing away from the middle of the body.
+      const d = Math.hypot(x - c.x, y - c.y) || 1;
+      const wx = (x - c.x) / d, wy = (y - c.y) / d;
+      ctx.lineWidth = 1.6 * s;
+      for (const [col, bend] of [['#d23a2a', 0.5], ['#3d6fd6', -0.5]]) {
+        ctx.strokeStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.quadraticCurveTo(x + (wx - wy * bend) * 7 * s, y + (wy + wx * bend) * 7 * s, x + (wx + wy * bend * 0.3) * 11 * s, y + (wy - wx * bend * 0.3) * 11 * s + 3 * s);
+        ctx.stroke();
+      }
     };
-    for (const key in this.limbs) {
-      const limb = this.limbs[key];
-      if (!limb.severed) continue;
-      puff(limb.joint.x, limb.joint.y, 6 * s);
-      if (this.alive) {
+    if (this.alive) {
+      for (const key in this.limbs) {
+        const limb = this.limbs[key];
+        if (!limb.severed) continue;
         const base = limb.top ? neck : pelvis;
         const along = limb.top ? 7 : 3;
         const side = limb.top ? 13 : 9;
-        puff(base.x + nx * side * s * limb.side + ux * along * s, base.y + ny * side * s * limb.side + uy * along * s, 5 * s);
+        socket(base.x + nx * side * s * limb.side + ux * along * s, base.y + ny * side * s * limb.side + uy * along * s, 5 * s);
       }
+    } else {
+      socket(neck.x, neck.y, 6 * s);
     }
-    if (!this.alive) puff(neck.x, neck.y, 7 * s);
+  }
+
+  // The segmented rubber neck between the shoulders and the head.
+  drawNeck(ctx) {
+    const s = this.s;
+    const { head, neck } = this.points;
+    const dx = head.x - neck.x, dy = head.y - neck.y;
+    capsulePath(ctx, neck.x, neck.y, neck.x + dx * 0.7, neck.y + dy * 0.7, 6 * s);
+    ctx.fillStyle = C.joint;
+    ctx.fill();
+    ctx.lineWidth = 1.5 * s;
+    ctx.strokeStyle = C.dummyLine;
+    ctx.stroke();
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;
+    ctx.strokeStyle = '#555b60';
+    ctx.lineWidth = 1.4 * s;
+    ctx.beginPath();
+    for (const t of [0.25, 0.45]) {
+      const x = neck.x + dx * t, y = neck.y + dy * t;
+      ctx.moveTo(x - nx * 5 * s, y - ny * 5 * s);
+      ctx.lineTo(x + nx * 5 * s, y + ny * 5 * s);
+    }
+    ctx.stroke();
   }
 
   drawHead(ctx, seg) {
@@ -519,46 +619,47 @@ export class Dummy {
     ctx.save();
     ctx.translate(head.x, head.y);
     ctx.rotate(ang);
-    // Tied-off sack knot on top.
-    ctx.fillStyle = this.segColor(seg);
-    ctx.strokeStyle = C.seam;
-    ctx.lineWidth = 2 * s;
-    ctx.beginPath();
-    ctx.moveTo(-3 * s, -19 * s);
-    ctx.lineTo(-9 * s, -29 * s);
-    ctx.lineTo(0, -25 * s);
-    ctx.lineTo(9 * s, -29 * s);
-    ctx.lineTo(3 * s, -19 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
+    if (!this.balloon || this.balloon.popped) {
+      // The seam across the skull and the target on the temple.
+      ctx.strokeStyle = C.dummyShade;
+      ctx.lineWidth = 1.5 * s;
+      ctx.beginPath();
+      ctx.arc(0, 4 * s, seg.r * 0.95, Math.PI * 1.2, Math.PI * 1.8);
+      ctx.stroke();
+      target(ctx, -12 * s, -9 * s, 5 * s);
+    }
 
     const hurt = this.hp / this.maxHp < 0.35 || !this.alive;
     const eye = (ex, xEye) => {
       if (xEye) {
-        ctx.strokeStyle = C.button;
-        ctx.lineWidth = 2.6 * s;
+        ctx.strokeStyle = C.dummyLine;
+        ctx.lineWidth = 2.4 * s;
         ctx.beginPath();
-        ctx.moveTo(ex - 4 * s, -7 * s);
-        ctx.lineTo(ex + 4 * s, 1 * s);
-        ctx.moveTo(ex + 4 * s, -7 * s);
-        ctx.lineTo(ex - 4 * s, 1 * s);
+        ctx.moveTo(ex - 3.5 * s, -5.5 * s);
+        ctx.lineTo(ex + 3.5 * s, 1.5 * s);
+        ctx.moveTo(ex + 3.5 * s, -5.5 * s);
+        ctx.lineTo(ex - 3.5 * s, 1.5 * s);
         ctx.stroke();
         return;
       }
-      ctx.fillStyle = C.button;
+      ctx.fillStyle = C.dummyLine;
       ctx.beginPath();
-      ctx.arc(ex, -3 * s, 4.8 * s, 0, Math.PI * 2);
+      ctx.ellipse(ex, -2 * s, 3 * s, 3.6 * s, 0, 0, Math.PI * 2);
       ctx.fill();
-      ctx.fillStyle = C.paperDim;
-      for (const [hx, hy] of [[-1.4, -1.4], [1.4, -1.4], [-1.4, 1.4], [1.4, 1.4]]) {
-        ctx.beginPath();
-        ctx.arc(ex + hx * s, -3 * s + hy * s, 0.8 * s, 0, Math.PI * 2);
-        ctx.fill();
-      }
+      ctx.fillStyle = 'rgba(255,255,255,0.8)';
+      ctx.beginPath();
+      ctx.arc(ex - 1 * s, -3.2 * s, 1 * s, 0, Math.PI * 2);
+      ctx.fill();
     };
-    eye(-7.5 * s, !this.alive);
-    eye(7.5 * s, hurt);
+    eye(-7 * s, !this.alive);
+    eye(7 * s, hurt);
+    // Moulded nose.
+    ctx.strokeStyle = C.dummyShade;
+    ctx.lineWidth = 1.6 * s;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(2.5 * s, 4 * s, 0, 5.5 * s);
+    ctx.stroke();
     if (this.armor?.head > 0) {
       // Riot helmet with a visor line.
       ctx.beginPath();
@@ -576,21 +677,17 @@ export class Dummy {
       if (this.armor.head < this.armor.max * 0.5) this.drawCrack(ctx, 0, -seg.r * 0.7, seg.r * 0.8);
     }
 
-    ctx.strokeStyle = C.stitch;
+    ctx.strokeStyle = C.dummyLine;
     ctx.lineWidth = 1.8 * s;
     if (this.ouch > 0 && this.alive) {
-      ctx.fillStyle = C.button;
+      ctx.fillStyle = C.dummyLine;
       ctx.beginPath();
-      ctx.ellipse(0, 9 * s, 4 * s, 5 * s * Math.min(1, this.ouch * 4), 0, 0, Math.PI * 2);
+      ctx.ellipse(0, 11 * s, 3.5 * s, 4.5 * s * Math.min(1, this.ouch * 4), 0, 0, Math.PI * 2);
       ctx.fill();
     } else {
       ctx.beginPath();
-      ctx.moveTo(-8 * s, 9 * s);
-      ctx.quadraticCurveTo(0, hurt ? 6 * s : 12 * s, 8 * s, 9 * s);
-      for (let i = -6; i <= 6; i += 4) {
-        ctx.moveTo(i * s, 7 * s);
-        ctx.lineTo(i * s, 12 * s);
-      }
+      ctx.moveTo(-6 * s, 11 * s);
+      ctx.quadraticCurveTo(0, hurt ? 8 * s : 13 * s, 6 * s, 11 * s);
       ctx.stroke();
     }
     ctx.restore();

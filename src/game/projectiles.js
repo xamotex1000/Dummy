@@ -185,7 +185,7 @@ export function projectileContact(sc, projPoint, other, speed) {
   const dmg = (30 + speed * 0.012) * (sc.level('anvil') >= 3 ? 1.8 : 1);
   sc.dealDamage(d, d.segForPoint(other), dmg, 'anvil', { x: other.x, y: other.y });
   other.addVelocity(0, Math.min(1500, speed * 0.6), sc.dt);
-  sc.fxFluff(other.x, other.y, 10, 1.2);
+  sc.fxFoam(other.x, other.y, 10, 1.2);
   sc.sfx.clang();
   sc.sfx.punch();
   sc.shake(0.35);

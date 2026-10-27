@@ -226,7 +226,7 @@ export class StatusSystem {
         }
       } else if (sc.rng.chance(0.12)) {
         if (sc.gore.on) sc.gore.drip(c.x, c.y, d.s);
-        else sc.particles.spawn({ kind: 'fluff', x: c.x, y: c.y, vx: sc.rng.range(-30, 30), vy: 0, gravity: 900, size: 2.4 * d.s, color: C.fluff, life: 0.7, bounce: 0 });
+        else sc.particles.spawn({ kind: 'fluff', x: c.x, y: c.y, vx: sc.rng.range(-30, 30), vy: 0, gravity: 900, size: 2.4 * d.s, color: C.foam, life: 0.7, bounce: 0 });
       }
       if (st.acc >= 0.3) {
         st.acc -= 0.3;

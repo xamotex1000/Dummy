@@ -727,7 +727,7 @@ export class PlayScene {
   onSever(dummy, key) {
     const limb = dummy.limbs[key];
     const j = limb.joint;
-    this.fxFluff(j.x, j.y, 18, 1.4);
+    this.fxFoam(j.x, j.y, 18, 1.4);
     // Both ends bleed: the torn-off limb and the stump on the body.
     const stump = limb.root[0] && (limb.root[0].a === j ? limb.root[0].b : limb.root[0].a);
     this.gore.splash(j.x, j.y, 18, { spread: Math.PI });
@@ -751,10 +751,11 @@ export class PlayScene {
     const c = dummy.center();
     dummy.die(this.dt);
     if (this.grabbed?.dummy === dummy) this.releaseGrab(false);
-    this.fxFluff(c.x, c.y, 46, 2.4);
+    this.fxFoam(c.x, c.y, 46, 2.4);
     this.gore.splash(c.x, c.y, 44, { spread: Math.PI, speed: 1.3 });
-    for (let i = 0; i < 2; i++) {
-      this.particles.spawn({ kind: 'dot', x: dummy.points.head.x, y: dummy.points.head.y, vx: this.rng.range(-400, 400), vy: this.rng.range(-700, -300), gravity: 1600, size: 4.5 * dummy.s, color: C.button, life: 1.6, bounce: 0.5 });
+    // Bolts pop out of the joints.
+    for (let i = 0; i < 5; i++) {
+      this.particles.spawn({ kind: 'dot', x: c.x, y: c.y, vx: this.rng.range(-450, 450), vy: this.rng.range(-750, -300), gravity: 1600, size: 3.2 * dummy.s, color: C.bolt, life: 1.6, bounce: 0.5 });
     }
     this.fxText(c.x, c.y - 50 * dummy.s, 'DESTROYED', C.gold, 24);
     this.sfx.pop();
@@ -1123,16 +1124,18 @@ export class PlayScene {
       this.particles.spawn({ kind: 'spark', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, size: 2.5, color: C.paper, life: 0.2, drag: 6 });
     }
     this.particles.spawn({ kind: 'ring', x, y, size: 6, grow: 180 * (0.6 + power * 0.4), color: C.paper, life: 0.18 });
-    this.fxFluff(x, y, Math.round(2 + power * 3), 0.8);
+    this.fxFoam(x, y, Math.round(2 + power * 3), 0.8);
   }
 
-  fxFluff(x, y, n, spread = 1) {
+  // Padding foam and chips of yellow vinyl knocked out by a hit.
+  fxFoam(x, y, n, spread = 1) {
     for (let i = 0; i < n; i++) {
       const a = this.rng.range(0, Math.PI * 2);
       const sp = this.rng.range(80, 380) * spread;
+      const roll = this.rng.next();
       this.particles.spawn({
         kind: 'fluff', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 120, gravity: 500, drag: 2.2,
-        size: this.rng.range(2.5, 5.5), color: this.rng.chance(0.85) ? C.fluff : C.paperDim, life: this.rng.range(0.6, 1.4), bounce: 0.1,
+        size: this.rng.range(2.5, 5.5), color: roll < 0.65 ? C.foam : roll < 0.9 ? C.dummy : C.bolt, life: this.rng.range(0.6, 1.4), bounce: 0.1,
       });
     }
   }

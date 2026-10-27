@@ -2,7 +2,7 @@
 // on the padded back wall, runs down the side walls and drips from the
 // ceiling. Stumps pump for a moment after a limb comes off. Stains last
 // for the round. With gore off nothing here runs, and callers fall back
-// to stuffing.
+// to foam and plastic chips.
 
 import { C } from './theme.js';
 import { settings } from './settings.js';

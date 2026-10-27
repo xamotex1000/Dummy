@@ -4,7 +4,7 @@
 const KEY = 'crash-test-settings';
 
 const DEFAULTS = {
-  // Blood that splashes and stains the cell. Off swaps it all for stuffing.
+  // Blood that splashes and stains the cell. Off swaps it for foam and plastic.
   gore: true,
   // Credits from every run buy permanent facility upgrades.
   rogueLite: false,
