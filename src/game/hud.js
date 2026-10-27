@@ -219,7 +219,7 @@ export class Hud {
     drawTarget(ctx, pad + 10, 37, 10);
     ctx.font = font(20, F.display, 400);
     ctx.fillStyle = C.paper;
-    ctx.fillText('DUMMY RUN', pad + 28, 44);
+    ctx.fillText('CRASH TEST', pad + 28, 44);
     this.pauseButton(ctx);
     this.stitch(ctx, pad, 66, W - pad, 66);
 

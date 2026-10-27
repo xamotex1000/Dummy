@@ -271,7 +271,7 @@ export class TreeOverlay extends Overlay {
     ctx.globalAlpha = a;
     const installed = `${ownedCount() - 1}/${nodeCount() - 1} INSTALLED`;
     if (sheet.w >= 560) {
-      report(ctx, sheet.x, sheet.y, sheet.w, sheet.h, 'FACILITY DEVELOPMENT PLAN', { tone: GREEN, kicker: `FORM DR-15 · CAPITAL REQUISITION  ·  ${TODAY}`, reserve: 200 });
+      report(ctx, sheet.x, sheet.y, sheet.w, sheet.h, 'FACILITY DEVELOPMENT PLAN', { tone: GREEN, kicker: `FORM CT-15 · CAPITAL REQUISITION  ·  ${TODAY}`, reserve: 200 });
       mono(ctx, `BUDGET ${meta.credits} CR`, sheet.x + sheet.w - 18, sheet.y + 30, 15, { weight: 700, color: GREEN, align: 'right' });
       mono(ctx, installed, sheet.x + sheet.w - 18, sheet.y + 46, 10, { weight: 600, color: C.formMuted, align: 'right' });
     } else {

@@ -5,7 +5,7 @@
 
 import { TREE, node } from './tree.js';
 
-const KEY = 'dummy-run-meta';
+const KEY = 'crash-test-meta';
 
 // What the old flat upgrade shop charged, so its purchases can be refunded.
 const OLD_COSTS = { funding: [40, 80, 140], overtime: [50, 100, 160], toolkit: [90], prewired: [90], shortlist: [180], insurance: [160], salvage: [70, 150] };

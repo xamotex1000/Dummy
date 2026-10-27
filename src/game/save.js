@@ -2,7 +2,7 @@
 // screen and the route choice), so a closed tab or a quit to title can pick
 // up where it left off. A run that ends deletes its save.
 
-const KEY = 'dummy-run-save';
+const KEY = 'crash-test-save';
 const VERSION = 1;
 
 // `at` is where to resume: 'act' or 'route'.

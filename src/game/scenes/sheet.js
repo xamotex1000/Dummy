@@ -105,7 +105,7 @@ export function rule(ctx, x0, x1, y, color = C.rule) {
 
 // A report sheet: paper, a colored edge for the test class, and a masthead
 // with the calibration target, the facility line and the form title.
-export function report(ctx, x, y, w, h, title, { tone = C.formInk, hazardEdge = false, kicker = 'DUMMY RUN TEST FACILITY', form = null, compact = false, reserve = 0 } = {}) {
+export function report(ctx, x, y, w, h, title, { tone = C.formInk, hazardEdge = false, kicker = 'CRASH TEST FACILITY', form = null, compact = false, reserve = 0 } = {}) {
   if (shadows) {
     ctx.fillStyle = 'rgba(0,0,0,0.34)';
     ctx.fillRect(x + 5, y + 8, w, h);
@@ -272,7 +272,7 @@ export const floorName = (depth) => `${Math.floor((depth - 1) / FLOORS_PER_ACT) 
 
 export function reportNo(play, n = play.round?.number ?? play.run?.depth ?? 0) {
   const seed = play.run?.seed ?? 0;
-  return `DR-${(seed % 1679616).toString(36).toUpperCase().padStart(4, '0')}-${String(n).padStart(2, '0')}`;
+  return `CT-${(seed % 1679616).toString(36).toUpperCase().padStart(4, '0')}-${String(n).padStart(2, '0')}`;
 }
 
 export const kicker = (play, n) => `REPORT ${reportNo(play, n)}  ·  ${TODAY}`;
@@ -581,7 +581,7 @@ export class Overlay {
     ctx.fillStyle = '#394037';
     ctx.fillRect(x, slot + 6, w, 80);
     hazard(ctx, x, slot + 6, w, 4, 6);
-    mono(ctx, 'TEST RECORDER  DR-9', x + 16, slot + 22, 9, { weight: 600, color: C.muted });
+    mono(ctx, 'TEST RECORDER  CT-9', x + 16, slot + 22, 9, { weight: 600, color: C.muted });
     const feeding = pr.t > RISE && pr.t < pr.feedEnd;
     ctx.beginPath();
     ctx.arc(x + w - 20, slot + 18, 3.5, 0, TAU);
