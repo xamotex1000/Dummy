@@ -6,7 +6,7 @@
 // stays readable), the whole screen on phones.
 
 import { roundRectPath, capsulePath, wrapText } from '../../engine/renderer.js';
-import { clamp, easeOutCubic, easeOutBack } from '../../engine/math.js';
+import { clamp, lerp, easeOutCubic, easeOutBack } from '../../engine/math.js';
 import { drawWeaponIcon, drawTarget as target } from '../icons.js';
 import { WEAPONS, MAX_SLOTS } from '../weapons.js';
 import { drawOffer, takeCard, KIND_LABEL } from '../cards.js';
@@ -23,6 +23,8 @@ const TAU = Math.PI * 2;
 const HEAD = 58;
 const FOOT = 22;
 const TODAY = new Date().toISOString().slice(0, 10);
+// Torn printouts draw their own jagged shadow, so sheets skip theirs.
+let shadows = true;
 
 function setSpacing(ctx, px) {
   if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`;
@@ -106,8 +108,10 @@ function rule(ctx, x0, x1, y, color = C.rule) {
 // A report sheet: paper, a colored edge for the test class, and a masthead
 // with the calibration target, the facility line and the form title.
 function report(ctx, x, y, w, h, title, { tone = C.formInk, hazardEdge = false, kicker = 'DUMMY RUN TEST FACILITY', form = null, compact = false, reserve = 0 } = {}) {
-  ctx.fillStyle = 'rgba(0,0,0,0.34)';
-  ctx.fillRect(x + 5, y + 8, w, h);
+  if (shadows) {
+    ctx.fillStyle = 'rgba(0,0,0,0.34)';
+    ctx.fillRect(x + 5, y + 8, w, h);
+  }
   ctx.fillStyle = C.paper;
   ctx.fillRect(x, y, w, h);
   if (hazardEdge) hazard(ctx, x, y, w, 7, 9);
@@ -339,6 +343,129 @@ function reportNo(play, n = play.round?.number ?? play.run?.depth ?? 0) {
 
 const kicker = (play, n) => `REPORT ${reportNo(play, n)}  ·  ${TODAY}`;
 
+// -------------------------------------------------------------- printer
+
+// Results and card picks come out of a test recorder at the bottom of the
+// frame. It rises, feeds paper up a line at a time, pauses, then each sheet
+// tears off (tipping from its right-hand corner) and lifts free to where it
+// rests while the printer drops away. Sheets tear one after another.
+const FEED_STEP = 5;
+const RISE = 0.22;
+const TEAR = 0.14;
+const LIFT = 0.4;
+
+class Printer {
+  constructor(sfx, { count = 1, stagger = 0.1 } = {}) {
+    this.sfx = sfx;
+    this.count = count;
+    this.stagger = stagger;
+    this.feedTime = 0.9;
+    this.reset();
+  }
+
+  reset() {
+    this.t = 0;
+    this.lastTick = 0;
+    this.ripped = 0;
+  }
+
+  // Paper feeds at a steady rate, so longer sheets take a little longer.
+  setLength(px) {
+    if (this.t < RISE) this.feedTime = clamp(px / 650, 0.55, 1.2);
+  }
+
+  get feedEnd() {
+    return RISE + this.feedTime;
+  }
+
+  tearAt(i) {
+    return this.feedEnd + 0.12 + i * this.stagger;
+  }
+
+  freeAt(i) {
+    return this.tearAt(i) + TEAR;
+  }
+
+  get end() {
+    return this.freeAt(this.count - 1) + LIFT;
+  }
+
+  get locked() {
+    return this.t < this.end;
+  }
+
+  // First press finishes the feed, a second one finishes everything.
+  skip() {
+    this.t = this.t < this.feedEnd ? this.feedEnd : this.end;
+  }
+
+  update(dt) {
+    this.t += dt;
+    if (this.t > RISE && this.t < this.feedEnd && this.t - this.lastTick > 0.075) {
+      this.lastTick = this.t;
+      this.sfx.printFeed();
+    }
+    while (this.ripped < this.count && this.t >= this.tearAt(this.ripped)) {
+      this.ripped++;
+      this.sfx.paperTear();
+    }
+  }
+
+  // How much paper is out of the slot, in whole printed lines.
+  fed(len) {
+    const p = clamp((this.t - RISE) / this.feedTime, 0, 1);
+    return Math.min(len, Math.ceil((p * len) / FEED_STEP) * FEED_STEP);
+  }
+
+  // 0 tucked below the frame, 1 up and printing.
+  get raised() {
+    const down = clamp((this.t - this.freeAt(this.count - 1) - 0.1) / 0.3, 0, 1);
+    return easeOutCubic(this.t / 0.2) * (1 - down * down);
+  }
+
+  // Where sheet i of length `len` sits, given the slot and its resting y.
+  pose(i, restY, len, slotY) {
+    const t = this.t;
+    if (t < this.tearAt(i)) return { y: slotY - this.fed(len), angle: 0, clip: true, torn: false, free: 0 };
+    if (t < this.freeAt(i)) return { y: slotY - len, angle: 0.05 * easeOutCubic((t - this.tearAt(i)) / TEAR), clip: true, torn: true, free: 0 };
+    const k = clamp((t - this.freeAt(i)) / LIFT, 0, 1);
+    return { y: lerp(slotY - len, restY, easeOutCubic(k)), angle: 0.05 * (1 - easeOutBack(k)), clip: false, torn: true, free: k };
+  }
+}
+
+// A ragged tear along the bottom: [x, depth] pairs, stable per seed.
+function tornEdge(w, seed) {
+  let s = (seed * 9301 + 49297) % 233280;
+  const rnd = () => (s = (s * 9301 + 49297) % 233280) / 233280;
+  const pts = [];
+  for (let x = 0; x < w; x += 3 + rnd() * 7) pts.push([x, 1 + rnd() * 4.5]);
+  pts.push([w, 1 + rnd() * 4.5]);
+  return pts;
+}
+
+function tornPath(ctx, x, y, w, h, teeth) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + w, y);
+  for (let i = teeth.length - 1; i >= 0; i--) ctx.lineTo(x + teeth[i][0], y + h - teeth[i][1]);
+  ctx.closePath();
+}
+
+// Draws a sheet with a torn bottom edge. Returns what `draw` returns.
+function drawTorn(ctx, x, y, w, h, teeth, draw, shadowDy = 8) {
+  ctx.fillStyle = 'rgba(0,0,0,0.34)';
+  tornPath(ctx, x + 5, y + shadowDy, w, h, teeth);
+  ctx.fill();
+  ctx.save();
+  tornPath(ctx, x, y, w, h, teeth);
+  ctx.clip();
+  shadows = false;
+  const used = draw();
+  shadows = true;
+  ctx.restore();
+  return used;
+}
+
 // ----------------------------------------------------------------- base
 
 class Overlay {
@@ -377,6 +504,7 @@ class Overlay {
 
   update(dt, isTop) {
     this.t += dt;
+    this.printer?.update(dt);
     if (this.closing >= 0) {
       this.closing += dt;
       if (this.closing >= 0.18) {
@@ -392,6 +520,12 @@ class Overlay {
     for (const b of this.buttons) b.hover = b === hover;
     this.play.engine.cursor = hover ? 'pointer' : 'default';
     if (this.t < 0.2) return;
+    // While printing, a key or tap hurries the printer instead.
+    if (this.printer?.locked) {
+      if (input.keysPressed.size || p.released) this.printer.skip();
+      for (const b of this.buttons) b.armed = false;
+      return;
+    }
     for (const key of input.keysPressed) this.keys[key]?.();
     if (p.pressed) for (const b of this.buttons) b.armed = hit(b, p.x, p.y);
     if (p.released) {
@@ -452,6 +586,95 @@ class Overlay {
     }
     const R = this.ticketRect(w, this.heights[key], drop);
     this.heights[key] = draw(R.x, R.y, R.w, this.heights[key]);
+    return R;
+  }
+
+  // Seconds since the printout came free (or since the overlay opened).
+  get since() {
+    return this.printer ? this.printer.t - this.printer.end : this.t;
+  }
+
+  // The paper slot's resting height, near the bottom of the frame.
+  get slotY() {
+    return this.frame.y + this.frame.h - 26;
+  }
+
+  edge(seed, w) {
+    this.edges ??= new Map();
+    const key = `${seed}:${Math.round(w)}`;
+    if (!this.edges.has(key)) this.edges.set(key, tornEdge(w, seed));
+    return this.edges.get(key);
+  }
+
+  // The recorder housing, centered at cx. `stubs` are the torn-off scraps
+  // still sticking out of the slot: [{ x, w, seed }].
+  drawPrinter(ctx, cx, w, stubs = []) {
+    const pr = this.printer;
+    if (pr.raised <= 0) return;
+    const slot = this.slotY + (1 - pr.raised) * 90;
+    const x = cx - w / 2;
+    ctx.fillStyle = '#2c312b';
+    roundRectPath(ctx, x, slot - 12, w, 90, 8);
+    ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.09)';
+    ctx.fillRect(x + 8, slot - 10, w - 16, 2);
+    ctx.fillStyle = '#0a0c09';
+    ctx.fillRect(x + 12, slot - 2, w - 24, 5);
+    ctx.fillStyle = C.paperDim;
+    for (const st of stubs) {
+      if (!st) continue;
+      ctx.beginPath();
+      ctx.moveTo(st.x, slot + 2);
+      for (const [tx, d] of this.edge(st.seed, st.w)) ctx.lineTo(st.x + tx, slot + 2 - (6.5 - d));
+      ctx.lineTo(st.x + st.w, slot + 2);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.fillStyle = '#394037';
+    ctx.fillRect(x, slot + 6, w, 80);
+    hazard(ctx, x, slot + 6, w, 4, 6);
+    mono(ctx, 'TEST RECORDER  DR-9', x + 16, slot + 22, 9, { weight: 600, color: C.muted });
+    const feeding = pr.t > RISE && pr.t < pr.feedEnd;
+    ctx.beginPath();
+    ctx.arc(x + w - 20, slot + 18, 3.5, 0, TAU);
+    ctx.fillStyle = feeding ? (Math.floor(pr.t * 14) % 2 ? C.ctYellow : '#5a4a10') : C.good;
+    ctx.fill();
+  }
+
+  // Draws `drawAt(y)` as a printout in `pose`: clipped at the slot while it
+  // is still attached, tipped about its bottom-right corner, torn once off.
+  paper(ctx, x, w, h, pose, seed, drawAt) {
+    ctx.save();
+    if (pose.clip) {
+      ctx.beginPath();
+      ctx.rect(this.frame.x - 40, this.slotY - 4000, this.frame.w + 80, 4000);
+      ctx.clip();
+    }
+    const px = x + w, py = pose.y + h;
+    ctx.translate(px, py);
+    ctx.rotate(pose.angle);
+    ctx.translate(-px, -py);
+    const used = pose.torn ? drawTorn(ctx, x, pose.y, w, h, this.edge(seed, w), () => drawAt(pose.y)) : drawAt(pose.y);
+    ctx.restore();
+    return used;
+  }
+
+  // Like sheet(), but the sheet comes out of the printer.
+  printSheet(ctx, key, w, draw) {
+    w = Math.min(w, this.frame.w - 32);
+    key += `:${Math.round(w)}`;
+    if (this.heights[key] === undefined) {
+      ctx.save();
+      ctx.globalAlpha = 0;
+      this.heights[key] = draw(this.frame.x, this.frame.y, w, 200);
+      ctx.restore();
+    }
+    const h = this.heights[key];
+    const R = this.ticketRect(w, h, false);
+    this.printer.setLength(h);
+    const pose = this.printer.pose(0, R.y, h, this.slotY);
+    this.drawPrinter(ctx, R.x + R.w / 2, R.w + 44, [pose.torn && { x: R.x, w: R.w, seed: 1 }]);
+    this.heights[key] = this.paper(ctx, R.x, R.w, h, pose, 1, (y) => draw(R.x, y, R.w, h));
     return R;
   }
 
@@ -695,6 +918,7 @@ export class ClearOverlay extends Overlay {
     super(play);
     this.btn = { x: 0, y: 0, w: 0, h: 50, onClick: () => this.close(() => this.play.afterClear()) };
     this.buttons = [this.btn];
+    this.printer = new Printer(play.sfx);
     this.keys = { enter: this.btn.onClick, ' ': this.btn.onClick };
   }
 
@@ -704,7 +928,7 @@ export class ClearOverlay extends Overlay {
     ctx.save();
     ctx.globalAlpha = a;
     const short = this.frame.h < 480;
-    this.sheet(ctx, short ? 'short' : 'full', short ? 540 : 460, (x, y, w, h) => this.results(ctx, x, y, w, h, short));
+    this.printSheet(ctx, short ? 'short' : 'full', short ? 540 : 460, (x, y, w, h) => this.results(ctx, x, y, w, h, short));
     ctx.restore();
   }
 
@@ -780,7 +1004,7 @@ export class ClearOverlay extends Overlay {
     Object.assign(this.btn, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.btn, 'FILE REPORT & CONTINUE', { key: 'SPACE' });
     cy += 50 + 14 + (short ? 0 : FOOT);
-    stampMark(ctx, perfect ? 'PERFECT' : 'PASSED', rx - 62, y + 32, perfect ? C.accent : '#2f7d43', this.t - 0.2);
+    stampMark(ctx, perfect ? 'PERFECT' : 'PASSED', rx - 62, y + 32, perfect ? C.accent : '#2f7d43', this.since - 0.05);
     return cy - y;
   }
 }
@@ -805,6 +1029,7 @@ export class CardOverlay extends Overlay {
     this.cardButtons = [];
     this.dropButtons = [];
     this.reroll = { x: 0, y: 0, w: 0, h: 44, onClick: () => this.doReroll() };
+    this.printer = new Printer(play.sfx, { stagger: 0.1 });
     for (let i = 1; i <= 6; i++) {
       this.keys[String(i)] = () => {
         if (this.replacing) this.dropButtons[i - 1]?.onClick();
@@ -825,7 +1050,7 @@ export class CardOverlay extends Overlay {
     this.offer = drawOffer(run, this.play.rng, { ...this.draw, exclude: this.offer.map((c) => c.id) });
     if (!this.offer.length) this.offer = drawOffer(run, this.play.rng, this.draw);
     this.cardButtons = [];
-    this.t = 0.2;
+    this.printer.reset();
     this.play.sfx.select();
   }
 
@@ -912,6 +1137,77 @@ export class CardOverlay extends Overlay {
     super.update(dt, isTop);
   }
 
+  // Side by side, every card feeds out at once and they tear off one by one.
+  // Stacked (phones), the cards come out as one perforated strip, torn once
+  // at the bottom; the perforations let go as it lifts.
+  printCards(ctx, a) {
+    const rects = this.rects;
+    const n = rects.length;
+    if (!n) return;
+    const pr = this.printer;
+    const rows = rects[0].rows;
+    const first = rects[0], last = rects[n - 1];
+    const left = Math.min(...rects.map((r) => r.x));
+    const right = Math.max(...rects.map((r) => r.x + r.w));
+    const len = rows ? last.y + last.h - first.y : first.h;
+    pr.count = rows ? 1 : n;
+    pr.setLength(len);
+    const slot = this.slotY;
+    const poses = rows ? [pr.pose(0, first.y, len, slot)] : rects.map((r, i) => pr.pose(i, r.y, r.h, slot));
+    const stubs = rows ? [poses[0].torn && { x: first.x, w: first.w, seed: 1 }] : rects.map((r, i) => poses[i].torn && { x: r.x, w: r.w, seed: i + 1 });
+    this.drawPrinter(ctx, (left + right) / 2, right - left + 44, stubs);
+    const keys = this.fine;
+
+    if (pr.locked) {
+      if (rows) {
+        const pose = poses[0];
+        this.paper(ctx, first.x, first.w, len, pose, 1, (y) => {
+          shadows = false;
+          rects.forEach((r, i) => {
+            const cy = y + (r.y - first.y);
+            if (i < n - 1 && pose.free < 1) this.perforation(ctx, r.x, cy + r.h, r.w, rects[i + 1].y - (r.y + r.h), 1 - pose.free);
+            drawCard(ctx, this.offer[i], r.x, cy, r.w, r.h, true, i + 1, { keys });
+          });
+          shadows = true;
+        });
+      } else {
+        rects.forEach((r, i) => this.paper(ctx, r.x, r.w, r.h, poses[i], i + 1, (y) => drawCard(ctx, this.offer[i], r.x, y, r.w, r.h, false, i + 1, { keys })));
+      }
+      return;
+    }
+
+    // Printed and torn off: the cards are live.
+    this.offer.forEach((card, i) => {
+      const r = rects[i];
+      const hover = this.cardButtons[i]?.hover;
+      ctx.save();
+      ctx.globalAlpha = a * (this.picked && this.picked !== card ? 0.3 : 1);
+      ctx.translate(r.x + r.w / 2, r.y + r.h / 2 - (hover ? 8 : 0));
+      const s = this.picked === card ? 1 + (this.closing >= 0 ? this.closing * 0.6 : 0) : hover ? 1.03 : 1;
+      ctx.scale(s, s);
+      const draw = () => drawCard(ctx, card, -r.w / 2, -r.h / 2, r.w, r.h, rows, i + 1, { hover, keys });
+      if (rows && i < n - 1) draw();
+      else drawTorn(ctx, -r.w / 2, -r.h / 2, r.w, r.h, this.edge(rows ? 1 : i + 1, r.w), draw, hover ? 12 : 6);
+      ctx.restore();
+    });
+  }
+
+  // The paper joining two stacked cards on the strip.
+  perforation(ctx, x, y, w, h, alpha) {
+    ctx.save();
+    ctx.globalAlpha *= alpha;
+    ctx.fillStyle = C.paper;
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = C.rule;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.moveTo(x, y + h / 2);
+    ctx.lineTo(x + w, y + h / 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   renderDrops(ctx) {
     this.layoutDrops();
     const card = this.replacing;
@@ -948,23 +1244,10 @@ export class CardOverlay extends Overlay {
     const form = this.bonus ? 'FORM DR-12B · BONUS ALLOCATION' : 'FORM DR-12 · COMPONENT REQUISITION';
     this.heading(ctx, form, this.title, this.subtitle + keyHint, this.bonus ? C.accent : C.paper);
 
-    this.offer.forEach((card, i) => {
-      const r = this.rects[i];
-      const delay = i * 0.06;
-      const k = easeOutBack((this.t - delay) / 0.3);
-      if (k <= 0) return;
-      const hover = this.cardButtons[i]?.hover;
-      ctx.save();
-      ctx.globalAlpha = a * clamp((this.t - delay) / 0.15, 0, 1) * (this.picked && this.picked !== card ? 0.3 : 1);
-      ctx.translate(r.x + r.w / 2, r.y + r.h / 2 + (1 - k) * 40 - (hover ? 8 : 0));
-      const s = this.picked === card ? 1 + (this.closing >= 0 ? this.closing * 0.6 : 0) : hover ? 1.03 : 1;
-      ctx.scale(s, s);
-      drawCard(ctx, card, -r.w / 2, -r.h / 2, r.w, r.h, r.rows, i + 1, { hover, keys: this.fine });
-      ctx.restore();
-    });
+    this.printCards(ctx, a);
 
     const run = this.play.run;
-    if (this.canReroll) this.drawButton(ctx, this.reroll, `REROLL (${run.rerolls})`, { primary: false, key: 'R' });
+    if (this.canReroll && !this.printer.locked) this.drawButton(ctx, this.reroll, `REROLL (${run.rerolls})`, { primary: false, key: 'R' });
     ctx.restore();
   }
 }
@@ -1002,8 +1285,10 @@ function exhibit(ctx, card, x, y, w, h, index) {
 // exhibit photo, the finding, and a classification footer.
 function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = false } = {}) {
   const rc = C.rarity[card.rarity] ?? C.rarity.common;
-  ctx.fillStyle = 'rgba(0,0,0,0.35)';
-  ctx.fillRect(x + 4, y + (hover ? 12 : 6), w, h);
+  if (shadows) {
+    ctx.fillStyle = 'rgba(0,0,0,0.35)';
+    ctx.fillRect(x + 4, y + (hover ? 12 : 6), w, h);
+  }
   ctx.fillStyle = C.paper;
   ctx.fillRect(x, y, w, h);
   ctx.fillStyle = rc;
@@ -1399,6 +1684,7 @@ export class GameOverOverlay extends Overlay {
     super(play);
     this.btn = { x: 0, y: 0, w: 0, h: 50, onClick: () => this.close(() => this.play.newRun()) };
     this.buttons = [this.btn];
+    this.printer = new Printer(play.sfx);
     this.keys = { enter: this.btn.onClick, ' ': this.btn.onClick };
   }
 
@@ -1407,7 +1693,7 @@ export class GameOverOverlay extends Overlay {
     dim(ctx, this.frame, a * 0.8);
     ctx.save();
     ctx.globalAlpha = a;
-    this.sheet(ctx, 'go', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
+    this.printSheet(ctx, 'go', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
     ctx.restore();
   }
 
@@ -1438,7 +1724,7 @@ export class GameOverOverlay extends Overlay {
     cy += 18;
     Object.assign(this.btn, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.btn, 'NEW RUN', { key: 'SPACE' });
-    stampMark(ctx, 'VOID', rx - 46, y + 31, C.pen, this.t - 0.25, 24);
+    stampMark(ctx, 'VOID', rx - 46, y + 31, C.pen, this.since - 0.05, 24);
     return cy + 50 + 14 + (short ? 0 : FOOT) - y;
   }
 }
@@ -1449,6 +1735,7 @@ export class VictoryOverlay extends Overlay {
     this.endless = { x: 0, y: 0, w: 0, h: 50, onClick: () => this.close(() => this.play.goEndless()) };
     this.fresh = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close(() => this.play.newRun()) };
     this.buttons = [this.endless, this.fresh];
+    this.printer = new Printer(play.sfx);
     this.keys = { enter: this.endless.onClick, ' ': this.endless.onClick };
   }
 
@@ -1457,7 +1744,7 @@ export class VictoryOverlay extends Overlay {
     dim(ctx, this.frame, a * 0.9);
     ctx.save();
     ctx.globalAlpha = a;
-    this.sheet(ctx, 'win', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
+    this.printSheet(ctx, 'win', 440, (x, y, w, h) => this.body(ctx, x, y, w, h));
     ctx.restore();
   }
 
@@ -1486,7 +1773,7 @@ export class VictoryOverlay extends Overlay {
     cy += 60;
     Object.assign(this.fresh, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.fresh, 'NEW RUN', { primary: false, paper: true });
-    stampMark(ctx, 'CERTIFIED', rx - 70, y + 32, '#2f7d43', this.t - 0.25, 20);
+    stampMark(ctx, 'CERTIFIED', rx - 70, y + 32, '#2f7d43', this.since - 0.05, 20);
     return cy + 46 + 14 + (short ? 0 : FOOT) - y;
   }
 }

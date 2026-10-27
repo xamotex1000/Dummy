@@ -54,6 +54,19 @@ export class Sfx {
     this.a.tone({ freq: 1900, dur: 0.03, gain: 0.08, type: 'square' });
   }
 
+  // The test recorder: stepper-motor chatter while it feeds, then the tear-off.
+  printFeed() {
+    if (!this.a.throttle('printFeed', 60)) return;
+    this.a.tone({ freq: 420, freqEnd: 380, dur: 0.035, gain: 0.05, type: 'square' });
+    this.a.noise({ dur: 0.04, type: 'bandpass', freq: 3200, q: 3, gain: 0.08 });
+  }
+
+  paperTear() {
+    if (!this.a.throttle('paperTear', 50)) return;
+    this.a.noise({ dur: 0.18, type: 'highpass', freq: 1800, freqEnd: 5200, gain: 0.28 });
+    this.a.noise({ dur: 0.1, type: 'bandpass', freq: 900, q: 1.5, gain: 0.15 });
+  }
+
   rip() {
     this.a.noise({ dur: 0.28, type: 'bandpass', freq: 2200, freqEnd: 500, q: 2.5, gain: 0.7 });
   }
