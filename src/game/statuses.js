@@ -6,7 +6,7 @@ import { REACTIONS, loadDiscovered, saveDiscovered } from './reactions.js';
 import { C } from './theme.js';
 
 // Hits that count as blunt for shattering frozen parts.
-const BLUNT = new Set(['hands', 'bat', 'anvil', 'trap:spinner', 'trap:crusher', 'trap:spring']);
+const BLUNT = new Set(['hands', 'bat', 'sledge', 'anvil', 'trap:spinner', 'trap:crusher', 'trap:spring']);
 
 export class StatusSystem {
   constructor(sc) {
@@ -19,8 +19,20 @@ export class StatusSystem {
     return this.sc.run;
   }
 
-  duration(t) {
-    return t * (this.run?.statusMult ?? 1);
+  // How long a status lasts: the run's status multiplier, then discipline
+  // tiers and mods for that kind.
+  duration(t, kind) {
+    return t * (this.run?.statusMult ?? 1) * (this.run ? this.sc.statusScale(kind) : 1);
+  }
+
+  // An affix that blocks this status, with a label so it's not a mystery.
+  immune(d, affix, label) {
+    if (!d.affixes.has(affix)) return false;
+    if (this.sc.ready(affix + d.id, 1.2)) {
+      const c = d.center();
+      this.sc.fxText(c.x, c.y - 30, label, C.paperDim, 14);
+    }
+    return true;
   }
 
   // ------------------------------------------------------------- applying
@@ -28,7 +40,7 @@ export class StatusSystem {
   bleed(d, seg, dps, dur, weapon) {
     const key = 'bleed:' + seg.name;
     const st = d.statuses.get(key);
-    dur = this.duration(dur);
+    dur = this.duration(dur, 'bleed');
     if (st) {
       st.dps = Math.min(dps * 4, st.dps + dps * 0.5);
       st.t = Math.max(st.t, dur);
@@ -39,6 +51,7 @@ export class StatusSystem {
 
   burn(d, seg, dps, dur, weapon) {
     if (!d.alive) return;
+    if (this.immune(d, 'retardant', 'FLAME-RETARDANT')) return;
     if (d.traits.fireproof) {
       if (this.sc.ready('fireproof' + d.id, 1.2)) this.sc.fxText(d.segCenter(seg).x, d.segCenter(seg).y - 20, 'FIREPROOF', C.paperDim, 14);
       return;
@@ -49,7 +62,7 @@ export class StatusSystem {
     }
     const key = 'burn:' + seg.name;
     const st = d.statuses.get(key);
-    dur = this.duration(dur);
+    dur = this.duration(dur, 'burn');
     if (st) {
       st.dps = Math.max(st.dps, dps);
       st.t = Math.max(st.t, dur);
@@ -60,11 +73,13 @@ export class StatusSystem {
 
   // Chill builds up; at 1 the part freezes solid.
   chill(d, seg, amount, weapon) {
+    if (this.run?.noFreeze) return;
     if (!d.alive || seg.frozen > 0) {
       if (seg.frozen > 0) seg.frozen = Math.max(seg.frozen, 1);
       return;
     }
-    seg.chill += amount * (d.traits.fireproof ? 1.5 : 1);
+    if (this.immune(d, 'antifreeze', 'ANTIFREEZE')) return;
+    seg.chill += amount * (d.traits.fireproof ? 1.5 : 1) * (this.run ? this.sc.chillScale() : 1);
     if (seg.chill < 1) return;
     seg.chill = 0;
     if (d.statuses.has('burn:' + seg.name)) {
@@ -72,16 +87,17 @@ export class StatusSystem {
       this.steam(d, seg, weapon);
       return;
     }
-    seg.frozen = this.duration(this.sc.level('freeze') >= 2 ? 6 : 4);
+    seg.frozen = this.duration(this.sc.level('freeze') >= 2 ? 6 : 4, 'freeze');
     const c = d.segCenter(seg);
     this.sc.fxShards(c.x, c.y, 6);
     this.sc.sfx.freeze();
   }
 
+  // Returns true if the shock landed.
   shock(d, weapon, seg, { chain = true } = {}) {
-    if (!d.alive) return;
-    d.shockT = Math.max(d.shockT, this.duration(1.4));
-    if (!chain) return;
+    if (!d.alive || this.immune(d, 'insulated', 'INSULATED')) return false;
+    d.shockT = Math.max(d.shockT, this.duration(1.4, 'shock'));
+    if (!chain) return true;
     // Overload: a burning part blows up.
     for (const [key, st] of d.statuses) {
       if (st.kind !== 'burn') continue;
@@ -116,6 +132,7 @@ export class StatusSystem {
         this.reactionDamage(o, o.segMap.torso, 16, weapon, oc.x, oc.y);
       }
     }
+    return true;
   }
 
   nail(d, p, dur) {
@@ -129,7 +146,7 @@ export class StatusSystem {
     p.pinned = true;
     p.px = p.x;
     p.py = p.y;
-    d.nails.push({ p, x: p.x, y: p.y, t: dur });
+    d.nails.push({ p, x: p.x, y: p.y, t: d.affixes.has('greased') ? dur * 0.3 : dur });
   }
 
   unnail(d, n) {
@@ -230,7 +247,7 @@ export class StatusSystem {
       }
       if (st.acc >= 0.3) {
         st.acc -= 0.3;
-        sc.dealDamage(d, st.seg, st.dps * 0.3, st.weapon, { kind: 'dot' });
+        sc.dealDamage(d, st.seg, st.dps * 0.3, st.weapon, { kind: 'dot', status: st.kind });
         if (!d.alive) return;
       }
       if (st.t <= 0) d.statuses.delete(key);
@@ -250,7 +267,7 @@ export class StatusSystem {
       for (const st of d.sticksByPoint.get(p) ?? []) if (!st.broken) strain = Math.max(strain, st.strain);
       const seg = d.segForPoint(p);
       const limb = seg.limb && !d.limbs[seg.limb].severed ? seg.limb : null;
-      if (limb && strain > 1.5 && this.react('tearaway', d, 0.2)) {
+      if (limb && !d.affixes.has('welded') && strain > 1.5 && this.react('tearaway', d, 0.2)) {
         this.unnail(d, n);
         this.announce('tearaway', n.x, n.y, d.lastHitBy ?? 'nailgun');
         d.sever(limb);
@@ -310,6 +327,7 @@ export class StatusSystem {
       sc.stats.reactions++;
       this.run.totals.reactions++;
       sc.bonusEvent('reaction', { id, weapon });
+      sc.onReaction(id);
     }
     if (!this.discovered.has(id)) {
       this.discovered.add(id);

@@ -5,6 +5,8 @@
 import { WEAPONS } from './weapons.js';
 import { VARIANTS, TWISTS, totalKills } from './variants.js';
 import { reactionsPossible } from './reactions.js';
+import { rollAffixes } from './affixes.js';
+import { INCIDENT_IDS, INCIDENTS } from './incidents.js';
 
 const round10 = (v) => Math.max(10, Math.round(v / 10) * 10);
 const round5 = (v) => Math.round(v / 5) * 5;
@@ -108,9 +110,9 @@ const REWARD = { standard: 'card', elite: 'rare', crate: 'weapon', boss: 'boss' 
 
 export const REWARD_LABEL = {
   card: 'Card pick',
-  rare: 'Rare card pick, +1 choice',
+  rare: 'Rare card + rig mod',
   weapon: 'New weapon pick',
-  boss: 'Rare card pick',
+  boss: 'Rare card + prototype mod',
 };
 
 export function makeRound(run, rng, node) {
@@ -138,8 +140,10 @@ export function makeRound(run, rng, node) {
     }
   }
 
+  const rating = run.rating ?? 0;
   let time = (boss ? 60 : 40) + run.timeBonus;
   if (type === 'elite') time -= 5;
+  if (rating >= 4) time -= 4;
   if (node.twist === 'glass') time -= 12;
   time = Math.max(15, time);
 
@@ -149,6 +153,8 @@ export function makeRound(run, rng, node) {
 
   let hp = 100 * Math.pow(1.14, depth - 1) * run.dummyHpMult * (v.hpMult ?? 1) * Math.pow(1.5, run.loop);
   if (type === 'elite') hp *= 1.35;
+  if (rating >= 1) hp *= 1.1;
+  if (boss && rating >= 5) hp *= 1.2;
   if (node.twist === 'glass') hp *= 0.6;
   // Keeping the dummy alive has to be possible while still dealing the damage.
   if (secondary.id === 'noKill' && primary.type === 'damage') hp = Math.max(hp, primary.target * 1.3);
@@ -164,7 +170,7 @@ export function makeRound(run, rng, node) {
     primary,
     secondary,
     time,
-    dummy: { hp: Math.round(hp), variant: node.variant, scale: v.scale ?? 1, count },
+    dummy: { hp: Math.round(hp), variant: node.variant, scale: v.scale ?? 1, count, affixes: rollAffixes(rng, affixCount(type, rating, rng), { primary, variant: node.variant }) },
     env: {
       gravity: act.gravity * (node.twist === 'lowgrav' ? 0.35 : 1),
       vents: !!act.vents,
@@ -174,11 +180,18 @@ export function makeRound(run, rng, node) {
   };
 }
 
+// Elites always roll an affix; Safety Ratings add more and spread them.
+function affixCount(type, rating, rng) {
+  if (type === 'elite') return rating >= 2 ? 2 : 1;
+  if (type === 'boss') return rating >= 5 ? 1 : 0;
+  return rating >= 3 && rng.chance(0.33) ? 1 : 0;
+}
+
 function makeNode(run, rng, type) {
   const act = run.actDef;
   let variant = type === 'elite' ? rng.pick(act.elite) : rng.pick(act.roster);
   let twist = null;
-  if (type === 'crate') {
+  if (type === 'crate' || (type !== 'boss' && (run.rating ?? 0) >= 10)) {
     twist = rng.pick(Object.keys(TWISTS));
     if (twist === 'swarm') variant = 'runt';
   }
@@ -195,13 +208,21 @@ export function makeRoute(run, rng) {
     return [node];
   }
   const types = ['standard'];
-  const pool = ['elite', 'crate', 'standard', 'elite', 'crate'];
+  const pool = ['elite', 'crate', 'standard', 'elite', 'crate', 'incident', 'incident'];
   if (run.floor >= 2 && run.workshopUsed !== run.actIndex) pool.push('workshop', 'workshop');
+  if (run.floor >= 2) pool.push('supply', 'supply', 'supply');
   while (types.length < 3) {
     const t = rng.pick(pool);
     if (t === 'standard' || !types.includes(t)) types.push(t);
   }
-  return types.map((type) => (type === 'workshop' ? { type } : makeNode(run, rng, type)));
+  return types.map((type) => {
+    if (type === 'workshop' || type === 'supply') return { type };
+    if (type === 'incident') {
+      const usable = INCIDENT_IDS.filter((id) => !run.seenIncidents?.includes(id) && (INCIDENTS[id].ok?.(run) ?? true));
+      return { type, incident: rng.pick(usable.length ? usable : INCIDENT_IDS) };
+    }
+    return makeNode(run, rng, type);
+  });
 }
 
 export function primaryProgress(round, stats) {

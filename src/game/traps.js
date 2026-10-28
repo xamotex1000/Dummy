@@ -10,7 +10,7 @@ import { lerp } from '../engine/math.js';
 import { roundRectPath } from '../engine/renderer.js';
 import { C } from './theme.js';
 
-export const TRAP_ORDER = ['spring', 'spinner', 'fan', 'flamejet', 'saw', 'tesla', 'cryo', 'turret', 'crusher'];
+export const TRAP_ORDER = ['spring', 'spinner', 'fan', 'flamejet', 'saw', 'tesla', 'cryo', 'turret', 'crusher', 'pendulum', 'mine', 'rail'];
 export const STARTER_TRAPS = ['spring', 'spinner', 'fan', 'flamejet', 'saw', 'tesla'];
 export const MAX_TRAP_LEVEL = 5;
 
@@ -892,6 +892,298 @@ export const TRAPS = {
       ctx.fillRect(-40, -6, 80, 30);
       ctx.fillStyle = '#f2c230';
       ctx.fillRect(-40, 18, 80, 8);
+    },
+  },
+  pendulum: {
+    name: 'Pendulum Blade',
+    desc: 'A blade on a long arm that swings back and forth from the ceiling. Cuts bleed.',
+    rarity: 'rare',
+    surfaces: ['ceiling'],
+    perks: [
+      { name: 'Wide Arc', desc: 'Swings wider and faster.' },
+      { name: 'Razor Edge', desc: 'Cuts bleed twice as hard and tear limbs off twice as fast.' },
+    ],
+    init(t) {
+      t.phase = Math.random() * Math.PI * 2;
+      t.theta = 0;
+    },
+    // Arm length, and a swing that never reaches the walls.
+    geom(t, sc) {
+      const B = sc.bounds;
+      const L = Math.max(150, B.bottom - 170);
+      const room = Math.min(t.m.x, B.right - t.m.x) - 50;
+      const want = t.level >= 2 ? 1.1 : 0.85;
+      return { L, A: Math.min(want, Math.asin(Math.min(1, Math.max(0.2, room / L)))) };
+    },
+    end(t, sc, theta) {
+      const { L } = this.geom(t, sc);
+      return { x: t.m.x + Math.sin(theta) * L, y: 18 + Math.cos(theta) * L };
+    },
+    update(t, sc, dt) {
+      const { L, A } = this.geom(t, sc);
+      const w = t.level >= 2 ? 2.6 : 2.1;
+      t.phase += w * dt;
+      t.theta = A * Math.sin(t.phase);
+      const omega = A * w * Math.cos(t.phase);
+      const speed = Math.abs(omega) * L;
+      if (speed < 180) return;
+      const e = this.end(t, sc, t.theta);
+      // The blade's edge runs across the arm; it moves along the tangent.
+      const tx = Math.cos(t.theta) * Math.sign(omega), ty = -Math.sin(t.theta) * Math.sign(omega);
+      const razor = t.level >= 3;
+      for (const d of sc.dummies) {
+        if (!d.alive || d.entering) continue;
+        const hit = d.hitSwipe(e.x - tx * 34, e.y - ty * 34, e.x + tx * 30, e.y + ty * 30, 6);
+        if (!hit || !sc.ready(`pend${t.m.id}${d.id}`, 0.35)) continue;
+        const dmg = Math.min(30, 5 + speed * 0.012);
+        sc.dealDamage(d, hit.seg, dmg, 'trap:pendulum', { x: hit.x, y: hit.y, limbMult: razor ? 2 : 1 });
+        sc.addBleed(d, hit.seg, 3, razor ? 6 : 3, 'trap:pendulum');
+        const f = Math.min(speed * 0.55, 1100);
+        sc.push(hit, tx * f, ty * f - 120);
+        sc.fxFoam(hit.x, hit.y, 3, 0.7);
+        sc.fxSparks(hit.x, hit.y, 3, sc.gore.on ? C.blood : C.foam);
+        sc.sfx.slash();
+      }
+    },
+    draw(t, ctx, sc, layer) {
+      const m = t.m;
+      if (layer === 'back') {
+        ctx.fillStyle = '#4b5250';
+        ctx.fillRect(m.x - 26, 0, 52, 14);
+        ctx.strokeStyle = C.ink;
+        ctx.lineWidth = 2;
+        ctx.strokeRect(m.x - 26, 0, 52, 14);
+        return;
+      }
+      const e = this.end(t, sc, t.theta);
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(m.x, 18);
+      ctx.lineTo(e.x, e.y);
+      ctx.stroke();
+      ctx.strokeStyle = '#8d9592';
+      ctx.lineWidth = 4;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(m.x, 18, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#5f6765';
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = C.ink;
+      ctx.stroke();
+      // A crescent blade, edge facing down and out.
+      ctx.save();
+      ctx.translate(e.x, e.y);
+      ctx.rotate(-t.theta);
+      ctx.beginPath();
+      ctx.moveTo(-36, -6);
+      ctx.quadraticCurveTo(0, 46, 36, -6);
+      ctx.quadraticCurveTo(0, 16, -36, -6);
+      ctx.closePath();
+      ctx.fillStyle = C.steel;
+      ctx.fill();
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(0, 0, 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#5f6765';
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    },
+    icon(ctx) {
+      ctx.fillStyle = '#4b5250';
+      ctx.fillRect(-24, -46, 48, 10);
+      ctx.strokeStyle = '#8d9592';
+      ctx.lineWidth = 7;
+      ctx.beginPath();
+      ctx.moveTo(0, -38);
+      ctx.lineTo(14, 8);
+      ctx.stroke();
+      ctx.save();
+      ctx.translate(14, 10);
+      ctx.rotate(-0.3);
+      ctx.beginPath();
+      ctx.moveTo(-40, -6);
+      ctx.quadraticCurveTo(0, 50, 40, -6);
+      ctx.quadraticCurveTo(0, 18, -40, -6);
+      ctx.closePath();
+      ctx.fillStyle = C.steel;
+      ctx.fill();
+      ctx.restore();
+    },
+  },
+
+  mine: {
+    name: 'Landmine',
+    desc: 'Blows up when a dummy touches it, then rearms. Throws dummies into the ceiling.',
+    rarity: 'common',
+    surfaces: ['floor'],
+    perks: [
+      { name: 'Quick Rearm', desc: 'Rearms 40% faster with a bigger blast.' },
+      { name: 'Daisy Chain', desc: 'Each blast sets off two smaller ones beside it.' },
+    ],
+    init(t) {
+      t.cd = 0.5;
+    },
+    rearm(t) {
+      return t.level >= 2 ? 2.1 : 3.5;
+    },
+    update(t, sc, dt) {
+      if (t.cd > 0) {
+        t.cd -= dt;
+        return;
+      }
+      const B = sc.bounds;
+      const x = t.m.x;
+      const touching = sc.dummies.some((d) => d.alive && !d.entering && d.pointList.some((p) => Math.abs(p.x - x) < 36 && p.y + p.r > B.bottom - 20));
+      if (!touching) return;
+      t.cd = this.rearm(t);
+      const y = B.bottom - 10;
+      sc.explode(x, y, t.level >= 2 ? 145 : 120, 30, 'trap:mine', { size: 0.8 });
+      if (t.level >= 3) {
+        for (const off of [-110, 110]) {
+          const cx = x + off;
+          if (cx < 30 || cx > B.right - 30) continue;
+          sc.later(0.14, () => sc.explode(cx, y, 85, 14, 'trap:mine', { size: 0.45, noReactions: true }));
+        }
+      }
+    },
+    draw(t, ctx, sc, layer) {
+      if (layer !== 'back') return;
+      const { x, y } = t.m;
+      const armed = t.cd <= 0;
+      ctx.beginPath();
+      ctx.ellipse(x, y - 2, 30, 13, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fillStyle = C.olive;
+      ctx.fill();
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
+      ctx.fillStyle = '#4b5250';
+      ctx.fillRect(x - 34, y - 4, 68, 4);
+      const blink = armed ? (sc.time * 2) % 1 < 0.5 : false;
+      ctx.beginPath();
+      ctx.arc(x, y - 13, 4, 0, Math.PI * 2);
+      ctx.fillStyle = armed ? (blink ? '#ff3b30' : '#8a2a22') : '#6b7370';
+      ctx.fill();
+      ctx.stroke();
+      if (!armed) {
+        // Rearm progress along the rim.
+        ctx.strokeStyle = C.gold;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(x, y - 2, 36, Math.PI, Math.PI + Math.PI * (1 - t.cd / this.rearm(t)));
+        ctx.stroke();
+      }
+    },
+    icon(ctx) {
+      ctx.beginPath();
+      ctx.ellipse(0, 14, 42, 26, 0, Math.PI, 0);
+      ctx.closePath();
+      ctx.fillStyle = C.olive;
+      ctx.fill();
+      ctx.fillStyle = '#4b5250';
+      ctx.fillRect(-46, 12, 92, 10);
+      ctx.beginPath();
+      ctx.arc(0, -14, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#ff3b30';
+      ctx.fill();
+    },
+  },
+
+  rail: {
+    name: 'Arc Rail',
+    desc: 'Live rails on a wall or floor. Anything touching them is shocked and thrown off.',
+    rarity: 'common',
+    surfaces: ['wall', 'floor'],
+    perks: [
+      { name: 'High Current', desc: 'Reaches 50% farther and deals +50% damage.' },
+      { name: 'Discharge', desc: 'Every 3 seconds, arcs to the nearest dummy in range.' },
+    ],
+    init(t) {
+      t.live = 0;
+      t.charge = 0;
+    },
+    half: 90,
+    update(t, sc, dt) {
+      const m = t.m;
+      const depth = t.level >= 2 ? 70 : 46;
+      const dmgK = t.level >= 2 ? 1.5 : 1;
+      t.live = Math.max(0, t.live - dt * 4);
+      for (const d of sc.dummies) {
+        if (!d.alive || d.entering) continue;
+        for (const p of d.pointList) {
+          const dx = p.x - m.x, dy = p.y - m.y;
+          const along = -dx * m.ny + dy * m.nx;
+          const off = dx * m.nx + dy * m.ny;
+          if (off > depth + p.r || Math.abs(along) > this.half) continue;
+          t.live = 1;
+          const seg = d.segForPoint(p);
+          if (sc.ready(`rail${m.id}${d.id}`, 0.25)) {
+            const rx = m.x - m.ny * along, ry = m.y + m.nx * along;
+            sc.fxArc(rx + m.nx * 6, ry + m.ny * 6, p.x, p.y);
+            sc.dealDamage(d, seg, 3 * dmgK, 'trap:rail', { kind: 'grind', x: p.x, y: p.y });
+            sc.push({ dummy: d, seg, t: 0.5 }, m.nx * 380, m.ny * 380 - 80);
+            sc.sfx.zap();
+          }
+          if (sc.ready(`railShock${m.id}${d.id}`, 0.8)) sc.addShock(d, 'trap:rail', seg);
+          break;
+        }
+      }
+      if (t.level < 3) return;
+      t.charge += dt;
+      if (t.charge < 3) return;
+      const c = out(m, 20);
+      const target = nearestDummy(sc, c.x, c.y, 460);
+      if (!target) return;
+      t.charge = 0;
+      t.live = 1;
+      sc.fxArc(c.x, c.y, target.n.x, target.n.y);
+      sc.dealDamage(target.d, target.n.seg, 10 * dmgK, 'trap:rail', { x: target.n.x, y: target.n.y });
+      sc.addShock(target.d, 'trap:rail', target.n.seg);
+      sc.sfx.zap();
+    },
+    draw(t, ctx, sc, layer) {
+      if (layer !== 'back') return;
+      const h = this.half;
+      ctx.save();
+      mountFrame(ctx, t.m);
+      ctx.fillStyle = '#4b5250';
+      ctx.fillRect(0, -h - 6, 8, h * 2 + 12);
+      ctx.fillStyle = '#e7e2d6';
+      for (const y of [-h, -h / 3, h / 3, h]) ctx.fillRect(4, y - 4, 10, 8);
+      const glow = t.live > 0 ? `rgba(124,247,255,${0.4 + 0.6 * t.live})` : '#c8803e';
+      for (const x of [9, 15]) {
+        ctx.fillStyle = glow;
+        ctx.fillRect(x, -h, 4, h * 2);
+      }
+      ctx.strokeStyle = C.ink;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(0, -h - 6, 8, h * 2 + 12);
+      ctx.restore();
+      if (t.live > 0.5 && sc.state === 'playing' && sc.rng.chance(0.3)) {
+        const m = t.m;
+        const a = sc.rng.range(-h, h);
+        const x = m.x - m.ny * a + m.nx * 14, y = m.y + m.nx * a + m.ny * 14;
+        sc.fxArc(x, y, x + m.nx * sc.rng.range(10, 30) + sc.rng.range(-10, 10), y + m.ny * sc.rng.range(10, 30) + sc.rng.range(-10, 10));
+      }
+    },
+    icon(ctx) {
+      ctx.fillStyle = '#4b5250';
+      ctx.fillRect(-40, -44, 14, 88);
+      ctx.fillStyle = '#c8803e';
+      ctx.fillRect(-24, -40, 7, 80);
+      ctx.fillRect(-12, -40, 7, 80);
+      ctx.strokeStyle = C.volt;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.moveTo(-2, -20);
+      ctx.lineTo(18, -8);
+      ctx.lineTo(8, 4);
+      ctx.lineTo(34, 18);
+      ctx.stroke();
     },
   },
 };

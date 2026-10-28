@@ -6,7 +6,10 @@
 import { roundRectPath, capsulePath, wrapText } from '../../engine/renderer.js';
 import { clamp, easeOutCubic, easeOutBack } from '../../engine/math.js';
 import { drawWeaponIcon, drawTarget as target } from '../icons.js';
-import { WEAPONS, MAX_SLOTS } from '../weapons.js';
+import { WEAPONS } from '../weapons.js';
+import { DISCIPLINES, DISCIPLINE_IDS, sourceTags, trapTags } from '../tags.js';
+import { MODS } from '../mods.js';
+import { AFFIXES } from '../affixes.js';
 import { drawOffer, takeCard, KIND_LABEL } from '../cards.js';
 import { REWARD_LABEL } from '../objectives.js';
 import { VARIANTS, ACTS, TWISTS, FLOORS_PER_ACT } from '../variants.js';
@@ -16,6 +19,8 @@ import { settings, setSetting } from '../settings.js';
 import { meta } from '../meta.js';
 import { loadRun } from '../save.js';
 import { topScores } from '../scores.js';
+import { progress, setRating, RATINGS, CERTS } from '../progress.js';
+import { MUTATORS } from '../daily.js';
 import { TreeOverlay } from './tree-overlay.js';
 import { ScoresOverlay } from './records.js';
 import { C, F, font } from '../theme.js';
@@ -255,7 +260,16 @@ const TYPE_TONE = {
   elite: { tone: C.bad, label: 'ELITE' },
   crate: { tone: '#7b4fc4', label: 'CRATE' },
   workshop: { tone: C.ctYellow, label: 'WORKSHOP' },
+  supply: { tone: '#2f7d43', label: 'SUPPLY ROOM' },
+  incident: { tone: C.fire, label: 'INCIDENT', hazardEdge: true },
   boss: { tone: C.bad, label: 'BOSS', hazardEdge: true },
+};
+
+// The route stops that aren't fights: what they say on the ticket.
+const STOP_TEXT = {
+  workshop: { head: 'NO TEST THIS FLOOR', body: 'Skip this floor and upgrade one of your weapons instead.', reward: 'WEAPON UPGRADE' },
+  supply: { head: 'NO TEST THIS FLOOR', body: 'Spend scrap on cards, rig mods and services.', reward: 'SHOP WITH SCRAP' },
+  incident: { head: 'SOMETHING HAPPENED', body: 'No dummy, just a report and a choice. Risk and reward vary.', reward: 'A CHOICE' },
 };
 
 // ---------------------------------------------------------------- title
@@ -279,7 +293,22 @@ export class TitleOverlay extends Overlay {
     this.gearBtn = { x: 0, y: 0, w: 40, h: 40, onClick: () => play.engine.push(new SettingsOverlay(play)) };
     this.upgradeBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new TreeOverlay(play)) };
     this.recordsBtn = { x: 0, y: 0, w: 0, h: 40, onClick: () => play.engine.push(new ScoresOverlay(play)) };
-    this.keys = { s: this.gearBtn.onClick, u: () => settings.rogueLite && this.upgradeBtn.onClick(), r: this.recordsBtn.onClick };
+    // Today's daily test asks before throwing away a saved run.
+    this.dailyBtn = {
+      x: 0, y: 0, w: 0, h: 40,
+      onClick: () => {
+        if (this.save && !this.confirmDaily) {
+          this.confirmDaily = true;
+          this.play.sfx.select();
+        } else this.close(() => this.play.newRun({ daily: true }));
+      },
+    };
+    this.ratingDown = { x: 0, y: 0, w: 32, h: 30, onClick: () => this.shiftRating(-1) };
+    this.ratingUp = { x: 0, y: 0, w: 32, h: 30, onClick: () => this.shiftRating(1) };
+    this.keys = {
+      s: this.gearBtn.onClick, u: () => settings.rogueLite && this.upgradeBtn.onClick(), r: this.recordsBtn.onClick, d: this.dailyBtn.onClick,
+      arrowleft: this.ratingDown.onClick, arrowright: this.ratingUp.onClick,
+    };
     if (this.save) {
       this.continueBtn = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close(() => this.play.continueRun()) };
       this.newBtn = {
@@ -300,6 +329,34 @@ export class TitleOverlay extends Overlay {
     }
   }
 
+  shiftRating(dir) {
+    const before = progress.rating;
+    setRating(before + dir);
+    if (progress.rating !== before) this.play.sfx.select();
+  }
+
+  // The Safety Rating picker, once a win has opened rating 1. `compact`
+  // draws a short version starting at cx instead of centred on it.
+  renderRating(ctx, cx, y, compact = false) {
+    if (progress.maxRating <= 0) return [];
+    const r = progress.rating;
+    const label = compact ? `RATING ${r}/${progress.maxRating}` : r ? `SAFETY RATING ${r} OF ${progress.maxRating}` : `SAFETY RATING: STANDARD (UP TO ${progress.maxRating})`;
+    const lw = measure(ctx, label, 15, F.body, 700, 2) + 20;
+    if (compact) cx += 36 + lw / 2;
+    Object.assign(this.ratingDown, { x: cx - lw / 2 - 36, y: y - 21 });
+    Object.assign(this.ratingUp, { x: cx + lw / 2 + 4, y: y - 21 });
+    for (const [b, glyph, on] of [[this.ratingDown, '<', r > 0], [this.ratingUp, '>', r < progress.maxRating]]) {
+      ctx.globalAlpha *= on ? 1 : 0.35;
+      this.drawButton(ctx, b, glyph, { primary: false });
+      ctx.globalAlpha /= on ? 1 : 0.35;
+    }
+    text(ctx, label, cx, y, 15, { weight: 700, color: r ? C.ctYellow : C.paper, align: 'center', spacing: 2 });
+    if (compact) return [this.ratingDown, this.ratingUp];
+    const sub = r ? `Adds: ${RATINGS[r].desc}${r > 1 ? ' Plus every rating below.' : ''}  Score x${(1 + 0.1 * r).toFixed(1)}.` : 'Win at a rating to open the next one.';
+    text(ctx, sub, cx, y + 20, 13, { weight: 500, color: C.paperDim, align: 'center', maxWidth: this.L.w - 24 });
+    return [this.ratingDown, this.ratingUp];
+  }
+
   // Records, the upgrade tree in rogue-lite, and settings, top right.
   renderCorner(ctx) {
     const L = this.L;
@@ -317,6 +374,7 @@ export class TitleOverlay extends Overlay {
     };
     if (settings.rogueLite) add(this.upgradeBtn, narrow ? 'UPGRADES' : `UPGRADES · ${meta.credits} CR`);
     add(this.recordsBtn, 'RECORDS');
+    add(this.dailyBtn, this.confirmDaily ? 'DISCARD SAVE?' : narrow ? 'DAILY' : 'DAILY TEST');
     this.buttons = this.save ? [...corner, this.continueBtn, this.newBtn] : corner;
   }
 
@@ -445,11 +503,16 @@ export class TitleOverlay extends Overlay {
       const keys = bw >= 220;
       this.drawButton(ctx, this.continueBtn, `CONTINUE · ${r.act}-${r.floor}`, { key: keys ? 'SPACE' : null });
       this.drawButton(ctx, this.newBtn, this.confirmNew ? 'DISCARD SAVE?' : 'NEW RUN', { primary: false, key: keys ? 'N' : null });
+      // The saved run keeps its own rating, so the picker sits out.
     } else {
       const py = y + h * s + (short ? 26 : 44);
       ctx.globalAlpha = a * pulse(this.t);
       const verb = this.fine ? 'CLICK OR PRESS SPACE' : 'TAP';
       text(ctx, `${verb} TO BEGIN TESTING`, px, py, short ? 18 : 22, { weight: 700, color: C.paper, align: 'center', spacing: 3, maxWidth: L.w - 24 });
+      ctx.globalAlpha = a;
+      // Short screens have no room under the prompt: the picker goes top left.
+      const rb = short ? this.renderRating(ctx, 16, 36, true) : this.renderRating(ctx, px, py + 40);
+      this.buttons.push(...rb);
     }
     ctx.restore();
   }
@@ -507,7 +570,8 @@ export class IntroOverlay extends Overlay {
 
     if (short) {
       cy += 26;
-      text(ctx, `SUBJECT: ${v.name.toUpperCase()}${twist ? `  ·  TWIST: ${twist.name.toUpperCase()}` : ''}`, lx, cy, 14, { weight: 700, spacing: 1, maxWidth: inner });
+      const extra = [twist && `TWIST: ${twist.name.toUpperCase()}`, ...(round.dummy.affixes ?? []).map((id) => AFFIXES[id].name.toUpperCase())].filter(Boolean);
+      text(ctx, `SUBJECT: ${v.name.toUpperCase()}${extra.length ? `  ·  ${extra.join('  ·  ')}` : ''}`, lx, cy, 14, { weight: 700, spacing: 1, maxWidth: inner });
       cy += 30;
       checkbox(ctx, lx, cy - 14, 'open');
       text(ctx, round.primary.label, lx + 26, cy, 19, { weight: 700, maxWidth: inner - 26 });
@@ -528,6 +592,11 @@ export class IntroOverlay extends Overlay {
       cy += 26;
       caption(ctx, `TWIST · ${twist.name.toUpperCase()}`, lx, cy, { color: '#7b4fc4' });
       cy += paragraph(ctx, twist.desc, lx, cy + 18, inner, 15, 19, {});
+    }
+    for (const id of round.dummy.affixes ?? []) {
+      cy += 26;
+      caption(ctx, `AFFIX · ${AFFIXES[id].name.toUpperCase()}`, lx, cy, { color: C.pen });
+      cy += paragraph(ctx, AFFIXES[id].desc, lx, cy + 18, inner, 15, 19, {});
     }
     cy += 34;
     section(ctx, lx, cy, inner, 2, 'PRIMARY OBJECTIVE', { right: 'REQUIRED' });
@@ -706,11 +775,11 @@ export class ClearOverlay extends Overlay {
 // Picks one card from an offer. Used for rewards, the starter weapon, the
 // workshop and crates. Taking a weapon with a full arsenal asks what to drop.
 export class CardOverlay extends Overlay {
-  constructor(play, { bonus = false, onDone, offer = null, title = null, subtitle = null, rerolls = true, kinds = null, count } = {}) {
+  constructor(play, { bonus = false, onDone, offer = null, title = null, subtitle = null, rerolls = true, kinds = null, count, filter = null } = {}) {
     super(play);
     this.bonus = bonus;
     this.onDone = onDone;
-    this.draw = { bonus, kinds, count: count ?? play.run.choices };
+    this.draw = { bonus, kinds, filter, count: count ?? play.run.choices };
     this.offer = offer ?? drawOffer(play.run, play.rng, this.draw);
     this.title = title ?? (bonus ? 'BONUS CARD' : 'PICK A CARD');
     this.subtitle = subtitle ?? `Floor ${play.round?.act}-${play.round?.floor} cleared. Choose one.`;
@@ -903,7 +972,7 @@ export class CardOverlay extends Overlay {
   renderDrops(ctx) {
     this.layoutDrops();
     const card = this.replacing;
-    this.heading(ctx, 'FORM CT-14 · EQUIPMENT DISPOSAL', 'ARSENAL FULL', `You can carry ${MAX_SLOTS} weapons. Drop one to take the ${card.name}.`, C.ctYellow);
+    this.heading(ctx, 'FORM CT-14 · EQUIPMENT DISPOSAL', 'ARSENAL FULL', `You can carry ${this.play.run.slots} weapons. Drop one to take the ${card.name}.`, C.ctYellow);
     const run = this.play.run;
     this.dropButtons.forEach((b, i) => {
       ctx.fillStyle = b.hover ? '#fffaf0' : C.paper;
@@ -944,6 +1013,29 @@ export class CardOverlay extends Overlay {
   }
 }
 
+export function cardTags(card) {
+  if (card.tags) return card.tags;
+  if (card.icon) return sourceTags(card.icon);
+  if (card.trapIcon) return trapTags(card.trapIcon);
+  return [];
+}
+
+// Discipline chips, right-aligned at rx with their top at y. Returns the
+// left edge.
+export function tagChips(ctx, tags, rx, y, h = 13) {
+  let x = rx;
+  for (let i = tags.length - 1; i >= 0; i--) {
+    const d = DISCIPLINES[tags[i]];
+    const w = measure(ctx, d.short, 9, F.mono, 700) + 8;
+    x -= w;
+    ctx.fillStyle = d.color;
+    ctx.fillRect(x, y, w, h);
+    mono(ctx, d.short, x + w / 2, y + h / 2 + 1, 9, { weight: 700, color: C.formInk, align: 'center', baseline: 'middle' });
+    x -= 3;
+  }
+  return x;
+}
+
 // A short, stable spec number for a card, like W-417.
 function cardCode(card) {
   let hsh = 0;
@@ -975,7 +1067,7 @@ function exhibit(ctx, card, x, y, w, h, index) {
 
 // Cards are component test sheets: class strip, kind and spec number, the
 // exhibit photo, the finding, and a classification footer.
-function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = false } = {}) {
+export function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = false } = {}) {
   const rc = C.rarity[card.rarity] ?? C.rarity.common;
   if (shadows) {
     ctx.fillStyle = 'rgba(0,0,0,0.35)';
@@ -991,6 +1083,8 @@ function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = fa
 
   const kind = KIND_LABEL[card.kind].toUpperCase();
   const code = `No. ${cardCode(card)}`;
+  // Disciplines, as chips: from the card itself, its weapon or its trap.
+  const tags = cardTags(card);
   const descColor = '#4a453c';
 
   if (rows) {
@@ -999,7 +1093,8 @@ function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = fa
     const tx = x + 22 + s;
     const tw = x + w - 12 - tx;
     caption(ctx, kind, tx, y + 23, { color: C.formInk });
-    mono(ctx, card.rarity.toUpperCase(), x + w - 12, y + 23, 10, { weight: 700, color: rc, align: 'right' });
+    if (tags.length) tagChips(ctx, tags, x + w - 12, y + 13);
+    else mono(ctx, card.rarity.toUpperCase(), x + w - 12, y + 23, 10, { weight: 700, color: rc, align: 'right' });
     rule(ctx, tx, x + w - 12, y + 29);
     let ty = y + 48;
     ctx.font = font(18, F.body, 700);
@@ -1015,7 +1110,8 @@ function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, keys = fa
   const lx = x + 12;
   const inner = w - 24;
   caption(ctx, kind, lx, y + 24, { color: C.formInk });
-  mono(ctx, code, x + w - 12, y + 24, 10, { weight: 600, color: C.formMuted, align: 'right' });
+  if (tags.length) tagChips(ctx, tags, x + w - 12, y + 14);
+  else mono(ctx, code, x + w - 12, y + 24, 10, { weight: 600, color: C.formMuted, align: 'right' });
   rule(ctx, lx, x + w - 12, y + 31);
   const ph = clamp(h * 0.3, 70, 96);
   exhibit(ctx, card, lx, y + 38, inner, ph, index);
@@ -1051,9 +1147,10 @@ export class PauseOverlay extends Overlay {
     this.resume = mk(() => this.close());
     this.restart = mk(() => this.close(() => this.play.newRun()));
     this.quit = mk(() => this.close(() => this.play.quitToTitle()));
+    this.file = mk(() => play.engine.push(new RunFileOverlay(play)));
     this.gearBtn = { x: 0, y: 0, w: 36, h: 36, onClick: () => play.engine.push(new SettingsOverlay(play)) };
-    this.buttons = [this.resume, this.restart, this.quit, this.gearBtn];
-    this.keys = { escape: this.resume.onClick, p: this.resume.onClick, enter: this.resume.onClick, s: this.gearBtn.onClick };
+    this.buttons = [this.resume, this.file, this.restart, this.quit, this.gearBtn];
+    this.keys = { escape: this.resume.onClick, p: this.resume.onClick, enter: this.resume.onClick, s: this.gearBtn.onClick, f: this.file.onClick };
   }
 
   render(ctx) {
@@ -1083,7 +1180,7 @@ export class PauseOverlay extends Overlay {
       { label: 'MACHINE', value: `${play.run.traps.length} TRAPS` },
     ]);
     cy += 40 + 14;
-    for (const [b, label, primary, key] of [[this.resume, 'RESUME TEST', true, 'ESC'], [this.restart, 'NEW RUN', false], [this.quit, 'QUIT TO TITLE', false]]) {
+    for (const [b, label, primary, key] of [[this.resume, 'RESUME TEST', true, 'ESC'], [this.file, 'RUN FILE: DISCIPLINES & MODS', false, 'F'], [this.restart, 'NEW RUN', false], [this.quit, 'QUIT TO TITLE', false]]) {
       Object.assign(b, { x: lx, y: cy, w: inner });
       this.drawButton(ctx, b, label, { primary, key, paper: true });
       cy += b.h + 10;
@@ -1112,6 +1209,138 @@ export class PauseOverlay extends Overlay {
       rule(ctx, x, x + w, cy + 11, C.ruleSoft);
     });
     return cy + 14;
+  }
+}
+
+// ---------------------------------------------------------------- run file
+
+// What the run is built from: disciplines and their tiers, rig mods, and the
+// reaction log, on three tabs.
+const FILE_TABS = [['disciplines', 'DISCIPLINES'], ['mods', 'RIG MODS'], ['reactions', 'REACTIONS']];
+
+export class RunFileOverlay extends Overlay {
+  constructor(play) {
+    super(play);
+    this.blocksUpdate = true;
+    this.tab = 'disciplines';
+    this.tabs = FILE_TABS.map(([id]) => ({ id, x: 0, y: 0, w: 0, h: 32, onClick: () => { this.tab = id; play.sfx.select(); } }));
+    this.done = { x: 0, y: 0, w: 0, h: 44, onClick: () => this.close() };
+    this.buttons = [...this.tabs, this.done];
+    const cycle = () => { this.tab = FILE_TABS[(FILE_TABS.findIndex(([id]) => id === this.tab) + 1) % FILE_TABS.length][0]; };
+    this.keys = { escape: this.done.onClick, enter: this.done.onClick, f: this.done.onClick, tab: cycle, arrowright: cycle, 1: () => { this.tab = 'disciplines'; }, 2: () => { this.tab = 'mods'; }, 3: () => { this.tab = 'reactions'; } };
+  }
+
+  render(ctx) {
+    const a = this.appear;
+    dim(ctx, this.frame, a * 1.1);
+    ctx.save();
+    ctx.globalAlpha = a;
+    const v = this.fit(ctx, [
+      { key: `${this.tab}:full`, w: 560, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+      { key: `${this.tab}:compact`, w: 640, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+    ]);
+    this.sheet(ctx, v.key, v.w, v.draw, false);
+    ctx.restore();
+  }
+
+  body(ctx, x, y, w, h, compact) {
+    const play = this.play;
+    const lx = x + 18;
+    const inner = w - 36;
+    report(ctx, x, y, w, h, 'RUN FILE', { tone: C.ctYellow, kicker: kicker(play), form: compact ? null : 'FORM CT-7 · RUN FILE' });
+    let cy = y + HEAD + 12;
+    const tw = (inner - 2 * 8) / 3;
+    FILE_TABS.forEach(([id, label], i) => {
+      const b = this.tabs[i];
+      Object.assign(b, { x: lx + i * (tw + 8), y: cy, w: tw });
+      const on = this.tab === id;
+      ctx.fillStyle = on ? C.formInk : b.hover ? C.ruleSoft : C.paper;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = C.formInk;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5);
+      text(ctx, label, b.x + b.w / 2, b.y + b.h / 2 + 1, 13, { weight: 700, color: on ? C.paper : C.formInk, align: 'center', baseline: 'middle', spacing: 1.5, maxWidth: b.w - 10 });
+    });
+    cy += 32 + 8;
+    if (this.tab === 'disciplines') cy = this.renderDisciplines(ctx, lx, cy, inner, compact);
+    else if (this.tab === 'mods') cy = this.renderMods(ctx, lx, cy, inner, compact);
+    else cy = this.renderReactions(ctx, lx, cy, inner, compact);
+    cy += 14;
+    Object.assign(this.done, { x: lx, y: cy, w: inner });
+    this.drawButton(ctx, this.done, 'BACK', { key: 'ESC', paper: true });
+    return cy + this.done.h + 14 + (compact ? 0 : FOOT) - y;
+  }
+
+  renderDisciplines(ctx, x, cy, w, compact) {
+    const syn = this.play.syn;
+    const ids = compact ? DISCIPLINE_IDS.filter((t) => syn.counts[t] > 0) : DISCIPLINE_IDS;
+    mono(ctx, syn.generalist ? 'GENERALIST: 6+ DISCIPLINES IN PLAY, +15% DAMAGE' : `GENERALIST AT 6 DISCIPLINES · ${syn.spread}/6`, x, cy + 12, 10, { weight: 700, color: syn.generalist ? '#2f7d43' : C.formMuted });
+    cy += 18;
+    if (!ids.length) {
+      text(ctx, 'Nothing in play yet. Weapons and traps each count toward their disciplines.', x, cy + 18, 14, { weight: 500, color: C.formMuted, maxWidth: w });
+      return cy + 28;
+    }
+    for (const t of ids) {
+      const d = DISCIPLINES[t];
+      const n = syn.counts[t];
+      const tier = syn.tiers[t];
+      cy += compact ? 22 : 24;
+      tagChips(ctx, [t], x + 34, cy - 12, 14);
+      text(ctx, d.name, x + 42, cy, 15, { weight: 700, color: n ? C.formInk : C.formMuted });
+      mono(ctx, `${n} SOURCE${n === 1 ? '' : 'S'}`, x + w, cy, 10, { weight: 600, color: C.formMuted, align: 'right' });
+      const rows = compact ? [[tier >= 2 ? 1 : 0, tier >= 2 ? syn.second : 2]] : [[0, 2], [1, syn.second]];
+      for (const [k, need] of rows) {
+        cy += compact ? 17 : 19;
+        checkbox(ctx, x + 42, cy - 12, tier > k ? 'done' : 'open');
+        const color = tier > k ? C.formInk : C.formMuted;
+        text(ctx, `${need}: ${d.tiers[k]}`, x + 64, cy, 13, { weight: tier > k ? 600 : 500, color, maxWidth: w - 64 });
+      }
+      rule(ctx, x, x + w, cy + 7, C.ruleSoft);
+    }
+    return cy + 8;
+  }
+
+  renderMods(ctx, x, cy, w, compact) {
+    const run = this.play.run;
+    if (!run.mods.length) {
+      cy += 22;
+      return cy + paragraph(ctx, 'No rig mods yet. Elites, bosses, the Supply Room and incidents hand them out.', x, cy, w, 14, 18, { color: C.formMuted });
+    }
+    for (const id of run.mods) {
+      const m = MODS[id];
+      const rc = C.rarity[m.rarity] ?? C.rarity.common;
+      cy += compact ? 20 : 22;
+      ctx.fillStyle = rc;
+      ctx.fillRect(x, cy - 10, 6, 12);
+      text(ctx, m.name, x + 14, cy, 15, { weight: 700 });
+      if (m.tags.length) tagChips(ctx, m.tags, x + w, cy - 11, 13);
+      if (compact) {
+        text(ctx, m.desc, x + 14 + measure(ctx, m.name, 15, F.body, 700) + 10, cy, 12, { weight: 500, color: C.formMuted, maxWidth: w - 200 });
+      } else {
+        cy += 17;
+        text(ctx, m.desc, x + 14, cy, 13, { weight: 500, color: C.formMuted, maxWidth: w - 14 });
+      }
+      rule(ctx, x, x + w, cy + 7, C.ruleSoft);
+    }
+    return cy + 8;
+  }
+
+  renderReactions(ctx, x, cy, w, compact) {
+    const found = this.play.status.discovered;
+    mono(ctx, `${found.size}/${REACTION_IDS.length} FOUND`, x, cy + 12, 10, { weight: 700, color: C.formMuted });
+    cy += 14;
+    for (const id of REACTION_IDS) {
+      const r = REACTIONS[id];
+      const known = found.has(id);
+      cy += compact ? 20 : 34;
+      ctx.fillStyle = known ? r.color : C.ruleSoft;
+      ctx.fillRect(x + 1, cy - 10, 10, 10);
+      text(ctx, known ? r.name : 'UNLOGGED', x + 20, cy, 14, { weight: 700, color: known ? C.formInk : C.formMuted });
+      const desc = known ? r.desc : `Hint: ${r.hint}`;
+      if (compact) text(ctx, desc, x + 130, cy, 12, { weight: 500, color: C.formMuted, maxWidth: w - 130 });
+      else text(ctx, desc, x + 20, cy + 15, 13, { weight: 500, color: C.formMuted, maxWidth: w - 20 });
+    }
+    return cy + (compact ? 8 : 22);
   }
 }
 
@@ -1194,7 +1423,7 @@ export class RouteOverlay extends Overlay {
     const inner = w - 32;
     const rows = this.rows;
     let title = `${tone.label} TEST`;
-    if (node.type === 'workshop') title = 'WORKSHOP';
+    if (STOP_TEXT[node.type]) title = tone.label;
     if (node.type === 'crate') title += ` · ${TWISTS[node.twist].name.toUpperCase()}`;
     report(ctx, x, y, w, h, title, { tone: tone.tone, hazardEdge: tone.hazardEdge, kicker: `TEST ORDER · OPTION ${i + 1}`, compact: rows, reserve: this.fine && this.tickets.length > 1 ? 34 : 0 });
     if (t.hover) {
@@ -1208,16 +1437,23 @@ export class RouteOverlay extends Overlay {
     const bottom = y + h - footH - 10;
     let cy = y + head + 22;
 
-    if (node.type === 'workshop') {
-      text(ctx, 'NO TEST THIS FLOOR', lx, cy, 17, { weight: 700, spacing: 0.8, maxWidth: inner });
-      paragraph(ctx, 'Skip this floor and upgrade one of your weapons instead.', lx, cy + 22, inner, 15, 19, { color: C.formMuted });
-      if (rows) mono(ctx, 'ON PASS: WEAPON UPGRADE', lx, y + h - 14, 11, { weight: 600, color: '#8a6a10' });
-      else fields(ctx, lx, y + h - footH - 10, inner, [{ label: 'ON SELECTION', value: 'WEAPON UPGRADE', size: 13 }], footH);
+    const stop = STOP_TEXT[node.type];
+    if (stop) {
+      text(ctx, stop.head, lx, cy, 17, { weight: 700, spacing: 0.8, maxWidth: inner });
+      paragraph(ctx, stop.body, lx, cy + 22, inner, 15, 19, { color: C.formMuted, maxLines: rows ? 2 : 4 });
+      if (rows) mono(ctx, `ON SELECTION: ${stop.reward}`, lx, y + h - 14, 11, { weight: 600, color: '#8a6a10' });
+      else fields(ctx, lx, y + h - footH - 10, inner, [{ label: 'ON SELECTION', value: stop.reward, size: 13 }], footH);
       return;
     }
     const round = node.round;
     const v = VARIANTS[node.variant];
     text(ctx, v.name.toUpperCase(), lx, cy, 17, { weight: 700, spacing: 0.8, maxWidth: inner });
+    // Affixes are the point of looking ahead: they sit right under the name.
+    const affixes = round.dummy.affixes ?? [];
+    if (affixes.length) {
+      cy += 17;
+      mono(ctx, affixes.map((id) => AFFIXES[id].name.toUpperCase()).join(' · '), lx, cy, 11, { weight: 700, color: C.pen, maxWidth: inner });
+    }
     if (!rows) {
       // Description lines get whatever room the objectives leave.
       const objH = 74;
@@ -1318,8 +1554,12 @@ export class ActOverlay extends Overlay {
       mono(ctx, ROMAN[i], px, py + 32, 11, { weight: 600, color: i === run.act - 1 ? C.paper : C.muted, align: 'center' });
     }
     mono(ctx, `FINAL SUBJECT: ${VARIANTS[act.boss].name.toUpperCase()}`, cx, cy + 172, 12, { weight: 600, color: C.muted, align: 'center', spacing: 1 });
+    // The run's conditions: its Safety Rating, and today's mutators for a daily.
+    const terms = [run.rating ? `SAFETY RATING ${run.rating}` : null, run.daily ? `DAILY TEST ${run.daily.date}` : null].filter(Boolean);
+    if (terms.length) mono(ctx, terms.join('  ·  '), cx, cy + 190, 12, { weight: 700, color: C.ctYellow, align: 'center', spacing: 1 });
+    if (run.daily) text(ctx, run.daily.mutators.map((id) => `${MUTATORS[id].name}: ${MUTATORS[id].desc}`).join('   '), cx, cy + 208, 13, { weight: 500, color: C.paperDim, align: 'center', maxWidth: R.w - 32 });
     ctx.globalAlpha = a * pulse(this.t);
-    text(ctx, this.fine ? 'CLICK OR PRESS SPACE' : 'TAP TO CONTINUE', cx, Math.min(R.y + R.h - 36, cy + 214), 18, { weight: 700, color: C.paper, align: 'center', spacing: 2.5 });
+    text(ctx, this.fine ? 'CLICK OR PRESS SPACE' : 'TAP TO CONTINUE', cx, Math.min(R.y + R.h - 36, cy + (run.daily ? 240 : 214)), 18, { weight: 700, color: C.paper, align: 'center', spacing: 2.5 });
     ctx.restore();
   }
 }
@@ -1391,6 +1631,16 @@ const runScoreText = (run) => (run.score ?? 0).toLocaleString('en-US');
 function renderFiling(o, ctx, lx, cy, inner, short) {
   const play = o.play;
   const lite = settings.rogueLite;
+  // What this run unlocked for the future.
+  const news = [
+    ...(play.run.newCerts ?? []).map((id) => `CERTIFIED ${CERTS[id].name.toUpperCase()}: ${MODS[CERTS[id].mod].name} unlocked`),
+    play.run.unlockedRating ? `SAFETY RATING ${progress.maxRating} UNLOCKED` : null,
+  ].filter(Boolean).slice(0, short ? 1 : 4);
+  for (const line of news) {
+    cy += 16;
+    mono(ctx, line, lx, cy, 11, { weight: 700, color: '#2f7d43', maxWidth: inner });
+  }
+  if (news.length) cy += 12;
   if (lite && !short) {
     fields(ctx, lx, cy, inner, [
       { label: 'CREDITS EARNED', value: `+${play.run.payout ?? 0}`, color: '#2f7d43' },

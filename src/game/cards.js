@@ -16,6 +16,7 @@ export const KIND_LABEL = {
   dummy: 'Dummy mod',
   perk: 'Perk',
   curse: 'Trade-off',
+  mod: 'Rig mod',
 };
 
 const STATIC_CARDS = [
@@ -104,15 +105,16 @@ function trapCards(run) {
 export function availableCards(run) {
   const statics = STATIC_CARDS.filter((c) => (run.cardCounts[c.id] ?? 0) < c.max);
   // Blood Pact can't push rounds below 20 seconds.
-  const filtered = statics.filter((c) => c.id !== 'bloodpact' || 40 + run.timeBonus - 8 >= 20);
+  const filtered = statics.filter((c) => (c.id !== 'bloodpact' || 40 + run.timeBonus - 8 >= 20) && (c.id !== 'secondwind' || !run.noSecondWind));
   return [...weaponCards(run), ...trapCards(run), ...filtered];
 }
 
 // `kinds` limits the offer (e.g. ['weapon'] for a crate, ['upgrade'] for the
-// workshop). Falls back to the full pool if that leaves nothing.
-export function drawOffer(run, rng, { bonus = false, exclude = [], kinds = null, count = run.choices } = {}) {
+// workshop), as does `filter`. Falls back to the full pool if `kinds`
+// leaves nothing.
+export function drawOffer(run, rng, { bonus = false, exclude = [], kinds = null, count = run.choices, filter = null } = {}) {
   const weights = bonus ? RARITY_WEIGHT.bonus : RARITY_WEIGHT.normal;
-  let pool = availableCards(run).filter((c) => !exclude.includes(c.id));
+  let pool = availableCards(run).filter((c) => !exclude.includes(c.id) && (!filter || filter(c)));
   if (kinds) {
     const only = pool.filter((c) => kinds.includes(c.kind));
     if (only.length) pool = only;

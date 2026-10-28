@@ -8,6 +8,7 @@ import { capsulePath } from '../engine/renderer.js';
 import { closestOnSegment, segmentDistance, clamp, hexToRgb } from '../engine/math.js';
 import { C, RGB, F, font } from './theme.js';
 import { drawTarget as target } from './icons.js';
+import { AFFIXES } from './affixes.js';
 import { VARIANTS } from './variants.js';
 import { settings } from './settings.js';
 
@@ -16,7 +17,7 @@ let nextId = 1;
 export const GROUPS = ['head', 'torso', 'arms', 'legs'];
 
 export class Dummy {
-  constructor(world, x, y, { scale = 1, hp = 100, limbFragility = 1, bounce = 0.25, variant = 'standard' } = {}) {
+  constructor(world, x, y, { scale = 1, hp = 100, limbFragility = 1, bounce = 0.25, variant = 'standard', affixes = [] } = {}) {
     const v = VARIANTS[variant] ?? VARIANTS.standard;
     this.id = nextId++;
     this.world = world;
@@ -26,6 +27,8 @@ export class Dummy {
     this.variant = variant;
     this.traits = v;
     this.boss = !!v.boss;
+    // Resistances rolled for the floor (see affixes.js).
+    this.affixes = new Set(affixes);
     this.impactMult = v.impactMult ?? 1;
     bounce = v.bounce ?? bounce;
     // Armor soaks hits to the head and torso until it has taken its share.
@@ -256,7 +259,7 @@ export class Dummy {
     this.ouch = 0.35;
     if (seg.limb) {
       const limb = this.limbs[seg.limb];
-      if (!limb.severed) {
+      if (!limb.severed && !this.affixes.has('welded')) {
         limb.hp -= amount * limbMult;
         if (limb.hp <= 0) {
           this.sever(seg.limb);
@@ -269,6 +272,11 @@ export class Dummy {
       res.killed = true;
     }
     return res;
+  }
+
+  isBurning() {
+    for (const st of this.statuses.values()) if (st.kind === 'burn') return true;
+    return false;
   }
 
   sever(key) {
@@ -336,6 +344,23 @@ export class Dummy {
     if (this.shockT > 0 && this.alive) this.drawArcs(ctx);
     ctx.restore();
     if (this.alive && this.hp < this.maxHp) this.drawHealth(ctx);
+    if (this.alive && this.affixes.size) this.drawAffixes(ctx);
+  }
+
+  // Affix names over the head, so you know what you're up against.
+  drawAffixes(ctx) {
+    const s = this.s;
+    const { head } = this.points;
+    const label = [...this.affixes].map((id) => AFFIXES[id].name.toUpperCase()).join(' · ');
+    ctx.font = font(9, F.mono, 700);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'alphabetic';
+    const w = ctx.measureText(label).width + 10;
+    const y = head.y - 50 * s;
+    ctx.fillStyle = 'rgba(22,25,21,0.8)';
+    ctx.fillRect(head.x - w / 2, y - 10, w, 14);
+    ctx.fillStyle = C.bad;
+    ctx.fillText(label, head.x, y + 1);
   }
 
   // Yellow vinyl, then damage, scorching, ice, electricity and hit flash.

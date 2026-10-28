@@ -8,6 +8,8 @@ import { WEAPONS } from './weapons.js';
 import { describeProgress, primaryProgress } from './objectives.js';
 import { VARIANTS, TWISTS } from './variants.js';
 import { TRAPS, TRAP_ORDER, drawTrapIcon } from './traps.js';
+import { DISCIPLINES, DISCIPLINE_IDS } from './tags.js';
+import { MODS } from './mods.js';
 import { C, F, font } from './theme.js';
 
 function setSpacing(ctx, px) {
@@ -107,6 +109,10 @@ export class Hud {
       if (this.hint.t <= 0) this.hint = null;
     }
     this.secPulse = Math.max(0, this.secPulse - dt);
+    if (this.toast) {
+      this.toast.t -= dt;
+      if (this.toast.t <= 0) this.toast = null;
+    }
   }
 
   render(ctx) {
@@ -119,6 +125,7 @@ export class Hud {
     }
     this.renderCombo(ctx);
     this.renderChain(ctx);
+    this.renderToast(ctx);
   }
 
   // ------------------------------------------------------------ shared bits
@@ -434,32 +441,112 @@ export class Hud {
       }
     }
 
-    // Cards taken this run, if there's room above the footer.
-    if (run.taken.length && y + 60 < L.h - footer) {
-      y += 24;
-      label(ctx, 'THIS RUN', pad, y, C.muted);
-      y += 22;
-      const counts = new Map();
-      for (const name of run.taken) counts.set(name, (counts.get(name) ?? 0) + 1);
-      ctx.font = font(15, F.body, 600);
-      ctx.textAlign = 'left';
-      for (const [name, n] of counts) {
-        if (y > L.h - footer + 4) break;
-        ctx.fillStyle = C.paperDim;
-        ctx.fillText(n > 1 ? `${name}  x${n}` : name, pad, y, inner);
-        y += 20;
-      }
-    }
+    y = this.renderDisciplines(ctx, y, pad, inner, L.h - footer);
+    y = this.renderMods(ctx, y, pad, inner, L.h - footer);
 
     // Footer: run summary and keys.
     this.stitch(ctx, pad, L.h - footer + 18, W - pad, L.h - footer + 18);
     ctx.font = font(14, F.body, 600);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = C.gold;
+    const scrap = `Scrap ${run.scrap}`;
+    ctx.fillText(scrap, pad, L.h - 26);
+    const sw = ctx.measureText(scrap).width;
     ctx.fillStyle = C.muted;
-    ctx.fillText(`Cards ${run.taken.length}  ·  Rerolls ${run.rerolls}  ·  Spares ${run.lives}`, pad, L.h - 26);
+    ctx.fillText(`  ·  Rerolls ${run.rerolls}  ·  Spares ${run.lives}`, pad + sw, L.h - 26);
     if (sc.input.finePointer) {
       ctx.textAlign = 'right';
       ctx.fillText('ESC pause', W - pad, L.h - 26);
     }
+  }
+
+  // Disciplines in play: a chip, the count, and a pip per tier reached.
+  renderDisciplines(ctx, y, pad, inner, limit) {
+    const syn = this.sc.syn;
+    const active = DISCIPLINE_IDS.filter((t) => syn.counts[t] > 0).sort((a, b) => syn.counts[b] - syn.counts[a]);
+    if (!active.length || y + 40 > limit) return y;
+    y += 24;
+    label(ctx, 'DISCIPLINES', pad, y, C.muted);
+    ctx.font = font(12, F.body, 700);
+    ctx.textAlign = 'right';
+    ctx.fillStyle = syn.generalist ? C.good : C.inkLine;
+    ctx.fillText(syn.generalist ? 'GENERALIST +15%' : `${syn.spread}/6 FOR GENERALIST`, pad + inner, y);
+    y += 6;
+    for (const t of active) {
+      if (y + 20 > limit) break;
+      const d = DISCIPLINES[t];
+      const n = syn.counts[t];
+      const tier = syn.tiers[t];
+      ctx.fillStyle = d.color;
+      ctx.fillRect(pad, y + 4, 30, 14);
+      ctx.font = font(10, F.mono, 700);
+      ctx.textAlign = 'center';
+      ctx.fillStyle = C.ink;
+      ctx.fillText(d.short, pad + 15, y + 15);
+      ctx.font = font(15, F.body, 600);
+      ctx.textAlign = 'left';
+      ctx.fillStyle = tier ? C.paper : C.paperDim;
+      ctx.fillText(d.name, pad + 38, y + 16);
+      const next = tier === 0 ? 2 : tier === 1 ? syn.second : null;
+      ctx.font = font(12, F.mono, 600);
+      ctx.textAlign = 'right';
+      ctx.fillStyle = C.muted;
+      ctx.fillText(next ? `${n}/${next}` : `${n}`, pad + inner - 30, y + 16);
+      for (let k = 0; k < 2; k++) {
+        ctx.fillStyle = k < tier ? d.color : C.inkSoft;
+        ctx.fillRect(pad + inner - 22 + k * 12, y + 6, 9, 10);
+      }
+      y += 21;
+    }
+    return y;
+  }
+
+  // Rig mods owned, as many as fit.
+  renderMods(ctx, y, pad, inner, limit) {
+    const run = this.sc.run;
+    if (!run.mods.length || y + 40 > limit) return y;
+    y += 24;
+    label(ctx, `RIG MODS · ${run.mods.length}`, pad, y, C.muted);
+    y += 20;
+    ctx.font = font(15, F.body, 600);
+    ctx.textAlign = 'left';
+    run.mods.forEach((id, i) => {
+      if (y > limit + 4) return;
+      const left = run.mods.length - i;
+      if (y + 20 > limit && left > 1) {
+        ctx.fillStyle = C.muted;
+        ctx.fillText(`+${left} more (pause for details)`, pad, y, inner);
+        y += 20;
+        return;
+      }
+      const m = MODS[id];
+      ctx.fillStyle = m.rarity === 'epic' ? C.rarity.epic : m.rarity === 'rare' ? '#8fb8ff' : C.paperDim;
+      ctx.fillText(m.name, pad, y, inner);
+      y += 20;
+    });
+    return y;
+  }
+
+  // A banner across the top of the arena, for certifications.
+  renderToast(ctx) {
+    const t = this.toast;
+    if (!t) return;
+    const A = this.L.arena;
+    const a = Math.min(1, t.t * 2, (3 - t.t) * 4 + 0.001);
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, a));
+    ctx.font = font(18, F.body, 700);
+    const w = ctx.measureText(t.text).width + 40;
+    const x = A.x + (A.w - w) / 2;
+    const y = A.y + 64;
+    ctx.fillStyle = 'rgba(22,25,21,0.92)';
+    ctx.fillRect(x, y, w, 34);
+    ctx.fillStyle = C.gold;
+    ctx.fillRect(x, y, 5, 34);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = C.gold;
+    ctx.fillText(t.text, x + w / 2, y + 23);
+    ctx.restore();
   }
 
   // ------------------------------------------------------- compact (phones)
