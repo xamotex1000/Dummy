@@ -83,7 +83,7 @@ export class IncidentOverlay extends Overlay {
       cy += 22;
       text(ctx, this.def.title.toUpperCase(), lx, cy, 18, { weight: 700, spacing: 1 });
       mono(ctx, `SCRAP ${run.scrap}`, rx, cy, 12, { weight: 700, color: '#2f7d43', align: 'right' });
-      cy += 8;
+      cy += 18;
     }
     cy += paragraph(ctx, this.def.text, lx, cy + 2, inner, 15, 20, {}) + 14;
 

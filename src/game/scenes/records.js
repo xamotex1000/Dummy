@@ -5,7 +5,7 @@ import { topScores } from '../scores.js';
 import { CERTS, CERT_IDS, progress } from '../progress.js';
 import { MODS } from '../mods.js';
 import { C } from '../theme.js';
-import { Overlay, HEAD, FOOT, TODAY, report, fields, section, text, mono, caption, rule, dim, paragraph, checkbox } from './sheet.js';
+import { Overlay, HEAD, FOOT, TODAY, report, fields, text, mono, caption, rule, dim, paragraph, checkbox } from './sheet.js';
 
 export class ScoresOverlay extends Overlay {
   // `highlight` is a score id to mark, such as the run that just ended.

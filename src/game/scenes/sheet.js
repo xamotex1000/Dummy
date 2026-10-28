@@ -56,7 +56,15 @@ export function measure(ctx, s, size, family = F.body, weight = 600, spacing = 0
 export function paragraph(ctx, s, x, y, width, size, lineH, opts = {}) {
   ctx.font = font(size, opts.family ?? F.body, opts.weight ?? 500);
   let lines = wrapText(ctx, s, width);
-  if (opts.maxLines) lines = lines.slice(0, Math.max(0, opts.maxLines));
+  if (opts.maxLines != null && lines.length > opts.maxLines) {
+    lines = lines.slice(0, Math.max(0, opts.maxLines));
+    // Cut text ends in an ellipsis that still fits the line.
+    if (lines.length) {
+      let last = lines[lines.length - 1];
+      while (last && ctx.measureText(last + '…').width > width) last = last.slice(0, last.lastIndexOf(' ') > 0 ? last.lastIndexOf(' ') : last.length - 1);
+      lines[lines.length - 1] = last.replace(/[\s,.;:]+$/, '') + '…';
+    }
+  }
   lines.forEach((ln, i) => text(ctx, ln, x, y + i * lineH, size, { weight: 500, ...opts }));
   return lines.length * lineH;
 }
