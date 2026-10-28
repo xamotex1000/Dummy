@@ -25,6 +25,8 @@ Every menu is a crash test report. Test orders come on spec sheets, cards are co
 
 The arena is simulated in fixed world units (580 tall) and scaled to fit the screen, so physics and weapon tuning feel the same at any size.
 
+**Performance.** Quality adapts to the device. The engine watches frame time. When frames run long for over a second, it steps down canvas resolution, the particle budget and how much physics it will catch up on in one frame. It steps back up after several seconds of headroom. Phones start one step down, at 2x resolution. Effects that don't matter to the game (flames, smoke, sparks, foam) thin out as the budget fills, and on-screen damage numbers are capped. Particles that look the same are drawn as one batch. Damage numbers are cached as small images. Finished blood stains are baked into one layer. Add `?quality=0`, `1` or `2` to the URL to pin a level (0 is full quality).
+
 | Desktop | Phone | Action |
 | --- | --- | --- |
 | Click | Tap | Punch, fire guns, drop a grenade or anvil |
@@ -290,8 +292,9 @@ src/
     renderer.js      DPR-aware canvas, trauma screen shake, path helpers
     input.js         unified mouse/touch pointer with smoothed swipe velocity
     audio.js         WebAudio synth (noise bursts + oscillators, no audio files)
-    particles.js     particle system (sparks, fluff, fire, smoke, rings, damage numbers)
+    particles.js     particle system (sparks, fluff, fire, smoke, rings, damage numbers), budgeted and batched
     rng.js           seeded RNG (mulberry32) with weighted sampling
+    perf.js          adaptive quality: resolution, particle budget, physics catch-up
     math.js          segment distance, easing, color mixing
   game/
     dummy.js         15-point ragdoll drawn as a crash test dummy, variants (armor, balloon, regen...), hit tests, severing

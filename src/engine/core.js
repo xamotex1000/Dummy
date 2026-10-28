@@ -14,6 +14,7 @@
 import { Renderer } from './renderer.js';
 import { Input } from './input.js';
 import { AudioEngine } from './audio.js';
+import { perf } from './perf.js';
 
 export class Engine {
   constructor(canvas, { step = 1 / 60 } = {}) {
@@ -92,8 +93,10 @@ export class Engine {
   }
 
   _frame(now) {
-    const dt = Math.min(0.1, Math.max(0, (now - this._last) / 1000));
+    const raw = Math.max(0, (now - this._last) / 1000);
+    const dt = Math.min(0.1, raw);
     this._last = now;
+    if (perf.frame(raw)) this.resize();
     let scale = 1;
     if (this.hitStopT > 0) {
       this.hitStopT -= dt;
@@ -104,13 +107,16 @@ export class Engine {
     }
     this.renderer.update(dt);
     this.acc += dt * scale;
+    // A slow device would rather run a little slow than spend each frame
+    // catching up on physics, which only makes the next frame slower.
+    const maxTicks = perf.settings.maxTicks;
     let n = 0;
-    while (this.acc >= this.step && n < 6) {
+    while (this.acc >= this.step && n < maxTicks) {
       this._tick(this.step);
       this.acc -= this.step;
       n++;
     }
-    if (n === 6) this.acc = 0;
+    if (n === maxTicks) this.acc = Math.min(this.acc, this.step);
     if (this.canvas.style.cursor !== this.cursor) this.canvas.style.cursor = this.cursor;
     this._render();
     requestAnimationFrame(this._frame);

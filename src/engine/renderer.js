@@ -1,5 +1,7 @@
 // Canvas wrapper: DPR-aware sizing, screen shake and a few path helpers.
 
+import { perf } from './perf.js';
+
 const reducedMotion = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export class Renderer {
@@ -16,7 +18,8 @@ export class Renderer {
 
   resize() {
     const rect = this.canvas.getBoundingClientRect();
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    // Resolution follows the adaptive quality level.
+    this.dpr = Math.min(window.devicePixelRatio || 1, perf.settings.dprCap);
     this.w = Math.max(1, rect.width);
     this.h = Math.max(1, rect.height);
     this.canvas.width = Math.round(this.w * this.dpr);
