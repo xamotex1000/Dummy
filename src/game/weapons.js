@@ -9,7 +9,7 @@ import { spawnRocket } from './projectiles.js';
 import { drawWeaponIcon } from './icons.js';
 import { C } from './theme.js';
 
-export const WEAPON_ORDER = ['hands', 'bat', 'knife', 'chainsaw', 'pistol', 'nailgun', 'taser', 'freeze', 'rocket', 'flame', 'grenade', 'vortex', 'anvil'];
+export const WEAPON_ORDER = ['hands', 'bat', 'sledge', 'knife', 'chainsaw', 'pistol', 'shotgun', 'nailgun', 'taser', 'freeze', 'rocket', 'flame', 'grenade', 'vortex', 'anvil'];
 export const MAX_LEVEL = 5;
 // Hands plus five: a full arsenal means dropping something to take a new one.
 export const MAX_SLOTS = 6;
@@ -211,6 +211,37 @@ function freezeBeam(sc) {
   if (sc.rng.chance(0.5)) sc.fxShards(hit.x, hit.y, 1);
 }
 
+// A spread of pellets that lose punch with distance. Breaching Rounds make
+// point-blank pellets hit twice as hard and throw much harder.
+function fireShotgun(sc) {
+  const g = heldGun(sc, 'shotgun');
+  if (!g) return;
+  const { held, m } = g;
+  const cfg = WEAPONS.shotgun.held;
+  const pellets = sc.level('shotgun') >= 2 ? 9 : 6;
+  const breach = sc.level('shotgun') >= 3;
+  const base = Math.atan2(m.uy, m.ux);
+  for (let i = 0; i < pellets; i++) {
+    const a = base + ((i + 0.5) / pellets - 0.5) * cfg.spread + sc.rng.range(-0.03, 0.03);
+    const ux = Math.cos(a), uy = Math.sin(a);
+    const hit = rayHit(sc, m.x, m.y, ux, uy, cfg.range);
+    const end = hit ?? { x: m.x + ux * cfg.range, y: m.y + uy * cfg.range };
+    sc.particles.spawn({ kind: 'beam', x: m.x, y: m.y, x2: end.x, y2: end.y, size: 1.2, color: C.gold, life: 0.05 });
+    if (!hit) continue;
+    const dist = Math.hypot(hit.x - m.x, hit.y - m.y);
+    const near = 1 - 0.65 * clamp(dist / cfg.range, 0, 1);
+    const close = breach && dist < 130 ? 2 : 1;
+    sc.push(hit, ux * 520 * near * close, uy * 520 * near * close - 60);
+    sc.dealDamage(hit.dummy, hit.seg, 5 * near * close, 'shotgun', { x: hit.x, y: hit.y });
+    sc.fxSparks(hit.x, hit.y, 2, C.gold);
+  }
+  sc.fxMuzzle(m.x, m.y);
+  sc.sfx.shot();
+  sc.sfx.boom(0.25);
+  sc.shake(0.25);
+  held.kick(-Math.sign(m.ux || 1) * cfg.recoil);
+}
+
 function fireRocket(sc) {
   const g = heldGun(sc, 'rocket');
   if (!g) return;
@@ -297,6 +328,49 @@ export const WEAPONS = {
     },
   },
 
+  sledge: {
+    name: 'Sledgehammer',
+    phrase: 'the sledgehammer',
+    hint: 'Held by the end of the handle. It is heavy: wind it up and let the head swing through.',
+    desc: 'A heavy head on a long handle. Slow to swing, crushing when it lands.',
+    unlockRarity: 'rare',
+    perks: [
+      { name: 'Shockwave', desc: 'Hits knock back other nearby dummies and deal 40% to them.' },
+      { name: 'Bone Breaker', desc: 'Hits tear limbs off three times as fast.' },
+    ],
+    held: {
+      // Most of the weight is in the head, so it lags the hand and swings wide.
+      body: { length: 104, com: 0.82, stiffness: 28, damping: 3.5, gravityComp: 0.25, maxSpin: 34 },
+      rest: (facing) => Math.PI / 2 - facing * 0.5,
+      strike: { s0: 78, s1: 112, pad: 10, minSpeed: 520, cooldown: 0.35, bounce: -0.15 },
+    },
+    heldUpdate(sc, held) {
+      meleeSweep(sc, 'sledge', held, this.held.strike, (hit, sp, dir) => {
+        const dmg = clamp(sp * 0.017, 8, 64);
+        const force = Math.min(sp * 0.85, 2900);
+        sc.push(hit, dir.x * force, dir.y * force);
+        sc.dealDamage(hit.dummy, hit.seg, dmg, 'sledge', { x: hit.x, y: hit.y, limbMult: sc.level('sledge') >= 3 ? 3 : 1 });
+        sc.fxHit(hit.x, hit.y, dir, dmg / 20);
+        sc.sfx.bat(dmg / 30);
+        sc.sfx.thud(Math.min(1, dmg / 40));
+        sc.shake(Math.min(0.4, dmg / 120));
+        if (dmg > 40) sc.engine.hitStop(0.05);
+        if (sc.level('sledge') < 2) return;
+        const c = hit.dummy.center();
+        for (const o of sc.dummies) {
+          if (o === hit.dummy || !o.alive) continue;
+          const oc = o.center();
+          const dist = Math.hypot(oc.x - c.x, oc.y - c.y);
+          if (dist > 200) continue;
+          const ux = (oc.x - c.x) / (dist || 1);
+          for (const p of o.pointList) if (!p.pinned) p.addVelocity(ux * 900, -500, sc.dt);
+          sc.dealDamage(o, o.segMap.torso, dmg * 0.4, 'sledge', { x: oc.x, y: oc.y });
+        }
+        sc.fxDust(c.x, c.y + 20, 6);
+      });
+    },
+  },
+
   knife: {
     name: 'Knife',
     phrase: 'the knife',
@@ -349,6 +423,32 @@ export const WEAPONS = {
     hold(sc, x0, y0, x1, y1, dt) {
       sc.pistolHeld = (sc.pistolHeld ?? 0) + dt;
       if (sc.pistolHeld >= 0.3 && sc.ready('pistol', 0.2)) firePistol(sc);
+    },
+  },
+
+  shotgun: {
+    name: 'Shotgun',
+    phrase: 'the shotgun',
+    hint: 'Held by the grip. Press to fire a spread of pellets. Best up close, and it kicks.',
+    desc: 'A wide spread that hits hardest up close and throws dummies across the room.',
+    unlockRarity: 'rare',
+    perks: [
+      { name: 'Buckshot', desc: 'Fires nine pellets instead of six.' },
+      { name: 'Breaching Rounds', desc: 'Point-blank pellets hit and throw twice as hard.' },
+    ],
+    held: {
+      body: { length: 70, com: 0.45, stiffness: 170, damping: 18, gravityComp: 1, maxSpin: 40 },
+      rest: (facing) => (facing > 0 ? 0 : Math.PI),
+      muzzle: { x: 70, y: -9 },
+      recoil: 30,
+      range: 560,
+      spread: 0.42,
+    },
+    press(sc) {
+      if (sc.ready('shotgun', 0.7)) fireShotgun(sc);
+    },
+    hold(sc) {
+      if (sc.ready('shotgun', 0.7)) fireShotgun(sc);
     },
   },
 

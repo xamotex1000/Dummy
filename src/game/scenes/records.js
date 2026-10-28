@@ -1,8 +1,11 @@
-// The high score table: the ten best runs on record, as a report sheet.
+// Test records: the ten best runs on record, and the certifications earned
+// so far, on two tabs.
 
 import { topScores } from '../scores.js';
+import { CERTS, CERT_IDS, progress } from '../progress.js';
+import { MODS } from '../mods.js';
 import { C } from '../theme.js';
-import { Overlay, HEAD, FOOT, TODAY, report, fields, section, text, mono, caption, rule, dim, paragraph } from './sheet.js';
+import { Overlay, HEAD, FOOT, TODAY, report, fields, section, text, mono, caption, rule, dim, paragraph, checkbox } from './sheet.js';
 
 export class ScoresOverlay extends Overlay {
   // `highlight` is a score id to mark, such as the run that just ended.
@@ -10,9 +13,12 @@ export class ScoresOverlay extends Overlay {
     super(play);
     this.blocksUpdate = true;
     this.highlight = highlight;
+    this.tab = 'runs';
     this.done = { x: 0, y: 0, w: 0, h: 46, onClick: () => this.close() };
-    this.buttons = [this.done];
-    this.keys = { escape: this.done.onClick, enter: this.done.onClick, r: this.done.onClick };
+    this.tabs = [['runs', 'TOP TEN RUNS'], ['certs', 'CERTIFICATIONS']].map(([id, label]) => ({ id, label, x: 0, y: 0, w: 0, h: 32, onClick: () => { this.tab = id; play.sfx.select(); } }));
+    this.buttons = [...this.tabs, this.done];
+    const flip = () => { this.tab = this.tab === 'runs' ? 'certs' : 'runs'; };
+    this.keys = { escape: this.done.onClick, enter: this.done.onClick, r: this.done.onClick, tab: flip, arrowright: flip, arrowleft: flip, c: flip };
   }
 
   render(ctx) {
@@ -21,8 +27,8 @@ export class ScoresOverlay extends Overlay {
     ctx.save();
     ctx.globalAlpha = a;
     const v = this.fit(ctx, [
-      { key: 'full', w: 600, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
-      { key: 'short', w: 640, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
+      { key: `${this.tab}:full`, w: 600, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, false) },
+      { key: `${this.tab}:short`, w: 640, draw: (x, y, w, h) => this.body(ctx, x, y, w, h, true) },
     ]);
     this.sheet(ctx, v.key, v.w, v.draw, false);
     ctx.restore();
@@ -43,10 +49,28 @@ export class ScoresOverlay extends Overlay {
       ]);
       cy += 40 + 30;
     } else {
-      cy += 18;
+      cy += 4;
     }
-    section(ctx, lx, cy, inner, 1, 'TOP TEN RUNS');
-    cy += 10;
+    // Tabs.
+    const tw = (inner - 8) / 2;
+    this.tabs.forEach((b, i) => {
+      Object.assign(b, { x: lx + i * (tw + 8), y: cy - 16, w: tw });
+      const on = this.tab === b.id;
+      ctx.fillStyle = on ? C.formInk : b.hover ? C.ruleSoft : C.paper;
+      ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.strokeStyle = C.formInk;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(b.x + 0.75, b.y + 0.75, b.w - 1.5, b.h - 1.5);
+      const count = b.id === 'certs' ? ` ${progress.certs.size}/${CERT_IDS.length}` : '';
+      text(ctx, b.label + count, b.x + b.w / 2, b.y + b.h / 2 + 1, 13, { weight: 700, color: on ? C.paper : C.formInk, align: 'center', baseline: 'middle', spacing: 1.5 });
+    });
+    cy += 24;
+    if (this.tab === 'certs') {
+      cy = this.renderCerts(ctx, lx, cy, inner, short);
+      Object.assign(this.done, { x: lx, y: cy, w: inner });
+      this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
+      return cy + this.done.h + 14 + (short ? 0 : FOOT) - y;
+    }
 
     // Columns as fractions of the width; narrow sheets drop the weapon and date.
     const narrow = inner < 460;
@@ -83,7 +107,7 @@ export class ScoresOverlay extends Overlay {
         floor: e.loop ? `${e.floor} E${e.loop}` : e.floor,
         result,
         weapon: e.weapon,
-        mode: e.mode === 'ROGUE-LITE' ? 'LITE' : 'LIKE',
+        mode: (e.mode === 'ROGUE-LITE' ? 'LITE' : e.mode === 'DAILY' ? 'DAILY' : 'LIKE') + (e.rating ? ` R${e.rating}` : ''),
         date: e.date,
       };
       const base = top + rowH - (short ? 5 : 7);
@@ -97,10 +121,30 @@ export class ScoresOverlay extends Overlay {
     });
     cy += 18;
     if (!short) {
-      cy += paragraph(ctx, 'Score: 1,000 per floor, 250 per secondary, 50 per reaction, 20 per dummy, damage / 10, and 5,000 for certifying the series.', lx, cy, inner, 12, 15, { color: C.formMuted }) + 2;
+      cy += paragraph(ctx, 'Score: 1,000 per floor, 250 per secondary, 50 per reaction, 20 per dummy, damage / 10, and 5,000 for certifying the series, then +10% per Safety Rating.', lx, cy, inner, 12, 15, { color: C.formMuted }) + 2;
     }
     Object.assign(this.done, { x: lx, y: cy, w: inner });
     this.drawButton(ctx, this.done, 'DONE', { key: 'ESC' });
     return cy + this.done.h + 14 + (short ? 0 : FOOT) - y;
+  }
+
+  // Every certification: what it asks for, and the mod it unlocks. Two
+  // columns when there's room.
+  renderCerts(ctx, lx, cy, inner, short) {
+    const cols = inner >= 520 ? 2 : 1;
+    const colW = (inner - (cols - 1) * 16) / cols;
+    const rowH = short ? 30 : 40;
+    const perCol = Math.ceil(CERT_IDS.length / cols);
+    CERT_IDS.forEach((id, i) => {
+      const c = CERTS[id];
+      const got = progress.certs.has(id);
+      const x = lx + Math.floor(i / perCol) * (colW + 16);
+      const y = cy + (i % perCol) * rowH;
+      checkbox(ctx, x, y + 2, got ? 'done' : 'open');
+      text(ctx, c.name, x + 24, y + 15, 14, { weight: 700, color: got ? C.formInk : C.formMuted, maxWidth: colW - 24 });
+      const line = short ? c.desc : `${c.desc} Unlocks ${MODS[c.mod].name}.`;
+      text(ctx, line, x + 24, y + (short ? 27 : 31), short ? 11 : 12, { weight: 500, color: C.formMuted, maxWidth: colW - 24 });
+    });
+    return cy + perCol * rowH + 12;
   }
 }

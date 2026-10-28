@@ -44,6 +44,22 @@ export class Run {
     this.prewired = false;
     this.trapStartLevel = 1;
 
+    // Rig mods, discipline sources they add, and the in-run currency.
+    this.mods = [];
+    this.tagBonus = {};
+    this.specialist = false;
+    this.resonance = false;
+    this.noFreeze = false;
+    this.scrap = 0;
+    this.scrapMult = 1;
+    this.slots = MAX_SLOTS;
+    this.extraDummies = 0;
+    // Difficulty and mode, chosen at the start.
+    this.rating = 0;
+    this.daily = null;
+    this.priceMult = 1;
+    this.noSecondWind = false;
+
     // Dummy modifiers
     this.dummyHpMult = 1;
     this.hydraChance = 0;
@@ -58,7 +74,7 @@ export class Run {
     this.weaponDamage = {};
     this.trapDamage = {};
     this.lastPrimary = null;
-    this.totals = { damage: 0, kills: 0, severs: 0, cleared: 0, bonuses: 0, reactions: 0 };
+    this.totals = { damage: 0, kills: 0, severs: 0, cleared: 0, bonuses: 0, reactions: 0, scrap: 0 };
   }
 
   get actDef() {
@@ -83,7 +99,7 @@ export class Run {
   }
 
   get slotsFull() {
-    return this.owned.length >= MAX_SLOTS;
+    return this.owned.length >= this.slots;
   }
 
   level(id) {

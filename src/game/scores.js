@@ -8,7 +8,9 @@ const MAX = 10;
 
 export function runScore(run) {
   const t = run.totals;
-  return t.cleared * 1000 + t.bonuses * 250 + t.reactions * 50 + t.kills * 20 + Math.round(t.damage / 10) + (run.won ? 5000 : 0);
+  const base = t.cleared * 1000 + t.bonuses * 250 + t.reactions * 50 + t.kills * 20 + Math.round(t.damage / 10) + (run.won ? 5000 : 0);
+  // Each Safety Rating adds 10%.
+  return Math.round(base * (1 + 0.1 * (run.rating ?? 0)));
 }
 
 export function topScores() {
@@ -31,6 +33,7 @@ export function recordScore(run, mode) {
     won: run.won,
     loop: run.loop,
     mode,
+    rating: run.rating ?? 0,
     weapon: fav ? WEAPONS[fav].name : '-',
     date: new Date().toISOString().slice(0, 10),
   };

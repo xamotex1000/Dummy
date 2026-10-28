@@ -71,6 +71,37 @@ export function drawWeaponIcon(ctx, id, x, y, size, { angle = 0, closed = false,
       ctx.stroke();
       break;
 
+    case 'sledge':
+      ctx.rotate(-Math.PI / 4);
+      roundRectPath(ctx, -48, -5, 78, 10, 4);
+      fillStroke(C.wood);
+      roundRectPath(ctx, 22, -24, 28, 48, 4);
+      fillStroke(C.iron);
+      ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+      ctx.beginPath();
+      ctx.moveTo(28, -18);
+      ctx.lineTo(28, 18);
+      ctx.stroke();
+      break;
+
+    case 'shotgun':
+      ctx.rotate(-0.2);
+      roundRectPath(ctx, -14, -20, 64, 9, 3);
+      fillStroke(C.iron);
+      roundRectPath(ctx, -14, -11, 56, 8, 3);
+      fillStroke(C.iron);
+      roundRectPath(ctx, 8, -6, 24, 9, 3);
+      fillStroke('#7a4a2a');
+      ctx.beginPath();
+      ctx.moveTo(-14, -20);
+      ctx.lineTo(-50, -10);
+      ctx.lineTo(-50, 12);
+      ctx.lineTo(-14, -3);
+      ctx.closePath();
+      fillStroke('#7a4a2a');
+      break;
+
     case 'knife':
       ctx.rotate(-Math.PI / 4);
       ctx.beginPath();
@@ -309,7 +340,7 @@ export function drawWeaponIcon(ctx, id, x, y, size, { angle = 0, closed = false,
 // Held weapons are drawn in a local frame whose origin is the grip: +x runs
 // along the weapon, and guns flip vertically when pointing left so they stay
 // upright. Units are world units.
-export const HELD_FLIPS = { pistol: true, flame: true, chainsaw: true, nailgun: true, taser: true, freeze: true, rocket: true };
+export const HELD_FLIPS = { pistol: true, shotgun: true, flame: true, chainsaw: true, nailgun: true, taser: true, freeze: true, rocket: true };
 
 export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
   ctx.save();
@@ -348,6 +379,40 @@ export function drawHeldWeapon(ctx, id, held, { flash = 0 } = {}) {
       ctx.moveTo(40, 3);
       ctx.lineTo(78, 5);
       ctx.stroke();
+      break;
+
+    case 'sledge':
+      roundRectPath(ctx, -6, -3.5, 92, 7, 3);
+      fillStroke(C.wood);
+      roundRectPath(ctx, -4, -4.5, 22, 9, 3);
+      fillStroke('#2b2b2b');
+      roundRectPath(ctx, 84, -15, 26, 30, 3);
+      fillStroke(C.iron);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)';
+      ctx.fillRect(88, -12, 3, 24);
+      break;
+
+    case 'shotgun':
+      ctx.beginPath();
+      ctx.moveTo(-5, -5);
+      ctx.lineTo(5, -5);
+      ctx.lineTo(8, 14);
+      ctx.lineTo(-3, 14);
+      ctx.closePath();
+      fillStroke('#7a4a2a');
+      ctx.beginPath();
+      ctx.moveTo(-4, -12);
+      ctx.lineTo(-26, -6);
+      ctx.lineTo(-26, 4);
+      ctx.lineTo(-2, -2);
+      ctx.closePath();
+      fillStroke('#7a4a2a');
+      roundRectPath(ctx, -6, -14, 76, 5, 2);
+      fillStroke(C.iron);
+      roundRectPath(ctx, -6, -9, 64, 5, 2);
+      fillStroke(C.iron);
+      roundRectPath(ctx, 24, -5, 24, 6, 2);
+      fillStroke('#7a4a2a');
       break;
 
     case 'knife':
