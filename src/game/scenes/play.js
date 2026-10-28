@@ -26,7 +26,7 @@ import { recordScore, runScore } from '../scores.js';
 import { TRAPS, createTrap, mountById } from '../traps.js';
 import { synergy, hitTags, DISCIPLINES } from '../tags.js';
 import { MODS, modOffer } from '../mods.js';
-import { affixMult, AFFIXES } from '../affixes.js';
+import { affixMult } from '../affixes.js';
 import { progress, CERTS, earnCert, unlockRating, recordDaily } from '../progress.js';
 import { DAILY_RATING, MUTATORS, MUTATOR_IDS, dailySeed, today } from '../daily.js';
 import {

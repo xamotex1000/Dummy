@@ -440,7 +440,7 @@ export const WEAPONS = {
       body: { length: 70, com: 0.45, stiffness: 170, damping: 18, gravityComp: 1, maxSpin: 40 },
       rest: (facing) => (facing > 0 ? 0 : Math.PI),
       muzzle: { x: 70, y: -9 },
-      recoil: 30,
+      recoil: 18,
       range: 560,
       spread: 0.42,
     },

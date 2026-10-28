@@ -1,6 +1,6 @@
 # Crash Test
 
-A proof-of-concept roguelike inspired by *Kick the Buddy*. Over a run you bolt a machine of traps into the cell (springs, spinners, saws, fans, tesla coils, crushers), then feed the dummy into it. You fight through three acts, pick your route between floors, draft weapons, traps and mods, and chain fire, ice, shocks, nails and blasts into reactions.
+A proof-of-concept roguelike inspired by *Kick the Buddy*. Over a run you bolt a machine of traps into the cell (springs, spinners, saws, pendulums, landmines, tesla coils, crushers), then feed the dummy into it. You fight through three acts, pick your route between floors, draft weapons, traps, cards and rig mods, and chain fire, ice, shocks, nails and blasts into reactions. Weapons and traps belong to disciplines that power up as you stack them. Elites come with affixes that punish one-trick builds. Scrap buys gear in the Supply Room. Safety Ratings, certifications and a daily test keep the meta moving.
 
 Everything runs on a small custom engine written for this project: plain JavaScript and Canvas 2D, with no libraries and no build step.
 
@@ -34,6 +34,9 @@ The arena is simulated in fixed world units (580 tall) and scaled to fit the scr
 | Esc or P | Pause button | Pause (also happens automatically when the window loses focus) |
 | Space / Enter | Tap | Confirm dialogs |
 | 1–6, R | Tap | Pick a card or ticket, reroll |
+| F (paused) | RUN FILE on the pause sheet | Open the run file: disciplines, rig mods, reactions |
+| ← / → (title) | < / > | Choose a Safety Rating |
+| D (title) | DAILY TEST | Start today's daily test |
 
 ## Settings
 
@@ -84,6 +87,8 @@ Sheets fit themselves to the screen: each one measures its layouts and uses the 
   - **Elite:** a tougher variant with more health and less time; reward is a rare-weighted pick with an extra choice.
   - **Crate:** a random twist (Zero-G, Glass Dummies, Swarm, Blackout); reward is a new weapon.
   - **Workshop:** no fight; upgrade one weapon. Once per act.
+  - **Supply Room** (from floor 2): no fight; spend scrap (see below).
+  - **Incident:** no fight; a short report with a choice (see below).
 - **Dummy variants.** Different ones reward different weapons:
   - **Child Dummies:** child-size, and come in pairs.
   - **Rubber Dummy:** takes a quarter of impact damage.
@@ -110,6 +115,7 @@ Sheets fit themselves to the screen: each one measures its layouts and uses the 
   - stick to one weapon
   - no impact damage
   - trigger a reaction
+- **Elites** (and, at higher Safety Ratings, bosses and ordinary dummies) roll **affixes** that shut down one approach, shown on the route ticket and over the dummy's head (see below). Clearing an elite also hands out a rig mod; a boss hands out a rarer one.
 - **Arsenal.** You carry up to 6 weapons including Hands. Taking a seventh asks which one to drop.
 - **Cards.**
   - **Weapons:** unlocks, plus upgrades (two perks per weapon, then +30% damage per level).
@@ -132,6 +138,9 @@ Traps are the heart of a run. They bolt onto **8 mount points** (three on the fl
 | Cryo Sprinkler | Ceiling | Freezes whatever is below it |
 | Nail Turret | Wall, ceiling | Tracks the dummy and nails it to the wall |
 | Crusher | Ceiling | Slams down on anything that passes beneath it |
+| Pendulum Blade | Ceiling | A blade on a long arm, swinging side to side. Cuts bleed. The swing narrows near the walls |
+| Landmine | Floor | Blows up when a dummy touches it and throws it into the ceiling, then rearms |
+| Arc Rail | Wall, floor | Live rails: anything touching them is shocked, ground down and thrown off |
 
 Traps work together. A spring pad under a crusher, a cryo sprinkler over a spinner, a tesla coil next to a nail turret: each pair sets off something neither does alone.
 
@@ -139,13 +148,84 @@ Traps work together. A spring pad under a crusher, a cryo sprinkler over a spinn
 
 Trap damage is credited to the trap, so it never breaks weapon bonuses like "Stick to one weapon." Two goals are built around it: the objective *Your traps deal X damage*, and the bonus *Hands off: only traps deal damage*.
 
+## Disciplines
+
+Every weapon and trap belongs to one or two of eight **disciplines**: Blunt, Blade, Ballistic, Fire, Cryo, Volt, Blast and Kinetic. Each weapon you own (Hands aside) and each trap you've installed is a **source** for its disciplines. Two sources unlock a discipline's first tier and four its second:
+
+| Discipline | Tier 1 (2 sources) | Tier 2 (4 sources) |
+| --- | --- | --- |
+| Blunt | Blunt hits +25% | Every fourth blunt hit is a Concussion: 2.5x |
+| Blade | Blade hits +15%, bleeding +50% | Limbs tear off 60% faster |
+| Ballistic | Ballistic hits +25% | 35% chance to ricochet for 1.6x |
+| Fire | Burns last 50% longer and deal +25% | Burning dummies take +20% from everything |
+| Cryo | Parts freeze 50% faster, cryo damage +25% | Frozen parts take +50% from everything |
+| Volt | Shocks last 50% longer and deal +30% | Shocked dummies take +20% from everything |
+| Blast | Explosions 20% bigger, +20% | Explosions +30% and throw twice as hard |
+| Kinetic | Impact damage +40% | Each bounce keeps 75% of the last |
+
+What a hit counts as comes from its source and how it landed: any impact is Kinetic, any explosion Blast, burn ticks Fire and bleed ticks Blade. With six disciplines in play at once you get the **Generalist** bonus, +15% to everything. So the choice is to go deep in one or two disciplines, or wide for Generalist. Cards and mods show their discipline chips, the sidebar shows your tiers, and the **Run File** (F on the pause sheet) lists every tier and source.
+
+## Rig mods
+
+Rig mods are run-long passives that change how a build plays, rather than adding flat stats. There are 45:
+
+- **Permits** (8): count as one more source for a discipline, e.g. Pyrotechnics Permit or Firearms License.
+- **Commons** (13): e.g. Lead Lining (impacts +40%), Thermite Paste (burning parts take +60% burn damage), Machine Grease (traps +20%), Piggy Bank (+1 scrap per dummy destroyed).
+- **Rares** (8): e.g. Accelerant (explosions set every part they hit on fire), Cold Snap, Surge Protector, Airbag (once per floor, 10 more seconds when the clock runs out), Extra Holster (a seventh weapon slot), Overtime Pact.
+- **Prototypes** (16): each one is locked until you earn its certification (below). They are build-defining: Storm Cell (lightning strikes a dummy every 3 seconds), Resonance (tier 2 needs only 3 sources), Specialist Badge (your best discipline counts one higher), Monomania, Domino, Tesla Gloves (blunt hits shock), Electromagnet and others.
+
+You get mods from elites (pick one of three), bosses (pick from rares and up), the Supply Room and incidents.
+
+## Scrap, the Supply Room and incidents
+
+**Scrap** is the run's currency. You earn it from every dummy destroyed, limb torn off and reaction set off, plus a payout per floor (more for meeting the secondary, beating an elite or a boss).
+
+The **Supply Room** is a route stop from floor 2 on. It stocks four cards and two rig mods with scrap prices, plus services: a Reroll Token, a Field Repair (gain a Second Wind) and a Restock that costs more each time.
+
+An **incident** is a short report with two or three responses. Most trade one thing for another: scrap now for tougher dummies, time for a mod, a gamble on a coin toss. There are 12: Coolant Spill, Unmarked Crate, Union Rep, Anonymous Donor, Exposed Wiring, Lab Accident, Surprise Inspection, Vending Machine, Product Recall, Calibration Day, Coin Toss and Training Seminar.
+
+## Elite affixes
+
+Affixes make an elite immune or resistant to one approach, so a build that does only one thing has to route around them:
+
+| Affix | Effect |
+| --- | --- |
+| Insulated | Immune to shocks |
+| Flame-Retardant | Can't be set on fire |
+| Antifreeze | Can't be frozen |
+| Kevlar Lining | Blade and ballistic damage -50% |
+| Shock Absorbers | Impact damage -70% |
+| Blast Shielding | Explosions deal 60% less |
+| Hardened Shell | Blunt damage -40% |
+| Welded Joints | Limbs can't be torn off |
+| Greased | Can't be grabbed, and nails slip out fast |
+| Grounded Frame | Traps deal 40% less |
+
+An affix never makes a floor impossible: a dummy whose objective is tearing off limbs never rolls Welded Joints, for example.
+
+## Safety Ratings, certifications and the daily test
+
+- **Safety Ratings** are the difficulty ladder. Winning a run opens the next rating; pick one with < / > on the title screen. Each rating adds a rule on top of all the ones below it, and multiplies your score by 1 + 0.1 per rating:
+  1. Dummies have 10% more health.
+  2. Elites come with two affixes.
+  3. A third of ordinary dummies come with an affix.
+  4. Every floor is 4 seconds shorter.
+  5. Bosses get an affix and 20% more health.
+  6. Supply Room prices are 30% higher.
+  7. Card picks show one card fewer.
+  8. Dummies repair themselves when left alone.
+  9. No Second Winds.
+  10. Every floor has a crate twist.
+- **Certifications** are 16 permanent achievements, each of which unlocks a prototype rig mod for future runs. Examples: Pyrotechnician (1,500 fire damage in a run) unlocks Pyromaniac; Electrician (40 shocks) unlocks Storm Cell; Bare Knuckles (beat a boss with only Hands and traps) unlocks Tesla Gloves; Safety Inspector (win at rating 5+) unlocks Resonance. RECORDS → CERTIFICATIONS lists them all.
+- **The daily test** (DAILY TEST on the title) is the same run for everyone on a given date. It is seeded from the date, played at Safety Rating 2 with two of eight mutators (e.g. Heavy Machinery: traps +50%, weapons 25% less; Payday; Critical Mass; Brittle Batch), and ignores the rogue-lite tree. It keeps its own best score.
+
 ## Reactions
 
 Status effects combine when they meet on the same dummy:
 
 | Reaction | How |
 | --- | --- |
-| Shatter | Blunt hit (Hands, Bat, Anvil, an impact or a blast) on a frozen part: triple damage, and frozen limbs snap off |
+| Shatter | Blunt hit (Hands, Bat, Sledgehammer, Anvil, an impact or a blast) on a frozen part: triple damage, and frozen limbs snap off |
 | Steam Burst | Burn a frozen part, or freeze a burning one |
 | Overload | Shock a burning part: it explodes |
 | Conductor | Shock a nailed dummy: current arcs through every nail |
@@ -173,9 +253,11 @@ Throwing the dummy into walls is deliberately modest:
 | --- | --- | --- |
 | Hands | Click/tap to punch, drag to grab and throw | Always carried |
 | Bat | Held: move it through the dummy | Hangs from the handle and whips. Blunt, so it shatters frozen parts |
+| Sledgehammer | Held: wind up and swing | A heavy head on a long handle. Slow and wide, crushing when it lands. Perks add a shockwave and limb-breaking |
 | Knife | Held: move it through the dummy | Held by the hilt. Cuts bleed and tear limbs off quickly |
 | Chainsaw | Held: hold to run the motor | Grinds whatever the blade touches, heavy bleeding |
 | Pistol | Held: press to fire, hold for auto-fire | Shoots along the barrel. Recoil kicks it up |
+| Shotgun | Held: press to fire | A spread of pellets, strongest up close, that throws dummies across the room |
 | Nail Gun | Held: press to fire | Nails parts to the wall. Pull a nailed limb hard enough and it tears off |
 | Taser | Held: press with the prongs on a dummy | Shocks, makes it spasm, and jumps to nearby dummies |
 | Freeze Ray | Held: hold to fire the beam | Freezes parts solid |
@@ -216,7 +298,13 @@ src/
     variants.js      dummy variants, the three acts, crate twists
     statuses.js      bleed / burn / freeze / shock / nails, and the reactions between them
     reactions.js     reaction list, codex discovery storage
-    traps.js         the machine: mount points and the nine traps
+    traps.js         the machine: mount points and the twelve traps
+    tags.js          disciplines: which weapon/trap counts for what, tiers and synergy
+    mods.js          rig mods: hook-based passives (mult, onHit, onKill, onClear, tick...)
+    affixes.js       elite affixes and how they scale damage
+    incidents.js     incident reports and their responses
+    progress.js      Safety Ratings and certifications (saved)
+    daily.js         the daily test: date seed and mutators
     projectiles.js   grenades, anvils, rockets, vortexes
     entrances.js     per-act spawn animations (cell door, ceiling hatch, chute)
     weapons.js       weapon definitions (input handlers, held-weapon physics config, perks)
@@ -239,7 +327,9 @@ src/
     scenes/sheet.js     report paper: primitives, the printer, the Overlay base class
     scenes/overlays.js  title, routes, acts, test order, results, cards, pause + codex, run end, settings
     scenes/tree-overlay.js  the progression tree screen
-    scenes/records.js   the high score table screen
+    scenes/records.js   the high score table and certifications screen
+    scenes/shop.js      the Supply Room
+    scenes/incident.js  the incident report screen
   main.js
 ```
 
@@ -247,7 +337,7 @@ How the main pieces fit together:
 
 - **Damage pipeline.** Weapons call `PlayScene.dealDamage(dummy, segment, amount, weaponId, {kind})`.
   - `kind` is `hit`, `blast`, `impact`, `dot`, `grind` or `reaction`.
-  - It first gives the status system a chance to react (Shatter), then applies run modifiers, armor and the dummy's response.
+  - It first gives the status system a chance to react (Shatter), then applies discipline tiers, rig mods, affixes, run modifiers, armor and the dummy's response.
   - Finally it records the event: round stats, per-weapon totals and the bonus check.
   - Damage from the arena itself (Furnace vents) hurts dummies but never counts for or against you.
 - **Statuses and reactions** live in `statuses.js`. Weapons go through scene helpers (`addBurn`, `addChill`, `addShock`, `addNail`, `addBleed`), and each reaction is rate-limited per dummy so combos can't loop.
@@ -255,7 +345,9 @@ How the main pieces fit together:
 - **Tear Away** reads `Stick.strain` from the physics step: how stretched a stick was before the solver corrected it.
 - **Adding content.** Each of these is a single entry:
   - a weapon: `WEAPONS`
-  - a trap: `TRAPS`, each with `update` and `draw`
+  - a trap: `TRAPS`, each with `update` and `draw` (plus its disciplines in `tags.js`)
+  - a rig mod: `MODS`, with any of its hooks
+  - an affix, incident, mutator or certification: `AFFIXES`, `INCIDENTS`, `MUTATORS`, `CERTS`
   - a dummy variant: `VARIANTS`
   - an act: `ACTS`
   - an objective: `PRIMARY`

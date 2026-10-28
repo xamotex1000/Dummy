@@ -474,8 +474,9 @@ export class TitleOverlay extends Overlay {
       ctx.restore();
     }
     const h = this.heights[key];
-    // Phones keep the top strip clear for the corner buttons.
-    const top = wide || short ? 0 : 60;
+    // Phones and short screens keep the top strip clear for the corner
+    // buttons (and, on short screens, the rating picker).
+    const top = wide ? 0 : short ? 52 : 60;
     const room = L.h - top - (short ? (this.save ? 64 : 56) : 104);
     const s = Math.min(1, room / h);
     const x = wide ? Math.max(48, L.w * 0.06) : (L.w - w * s) / 2;
@@ -1101,7 +1102,8 @@ export function drawCard(ctx, card, x, y, w, h, rows, index, { hover = false, ke
     const nameLines = wrapText(ctx, card.name.toUpperCase(), tw).slice(0, 2);
     nameLines.forEach((ln, i) => text(ctx, ln, tx, ty + i * 19, 18, { weight: 700, spacing: 0.5, maxWidth: tw }));
     ty += nameLines.length * 19;
-    const maxLines = Math.floor((y + h - 6 - ty) / 17);
+    // Always at least one line of description, even in a tight row.
+    const maxLines = Math.max(1, Math.floor((y + h - 6 - ty) / 17));
     paragraph(ctx, card.desc, tx, ty + 1, tw, 14, 17, { color: descColor, maxLines });
     if (keys) keycap(ctx, String(index), x + w - 12 - keyW(ctx, String(index)), y + h - 18);
     return;
@@ -1280,24 +1282,33 @@ export class RunFileOverlay extends Overlay {
       text(ctx, 'Nothing in play yet. Weapons and traps each count toward their disciplines.', x, cy + 18, 14, { weight: 500, color: C.formMuted, maxWidth: w });
       return cy + 28;
     }
-    for (const t of ids) {
+    // Compact sheets on wide, short screens use two columns.
+    const cols = compact && w >= 520 ? 2 : 1;
+    const gap = 20;
+    const cw = (w - gap * (cols - 1)) / cols;
+    const top = cy;
+    let bottom = cy;
+    ids.forEach((t, i) => {
       const d = DISCIPLINES[t];
       const n = syn.counts[t];
       const tier = syn.tiers[t];
-      cy += compact ? 22 : 24;
-      tagChips(ctx, [t], x + 34, cy - 12, 14);
-      text(ctx, d.name, x + 42, cy, 15, { weight: 700, color: n ? C.formInk : C.formMuted });
-      mono(ctx, `${n} SOURCE${n === 1 ? '' : 'S'}`, x + w, cy, 10, { weight: 600, color: C.formMuted, align: 'right' });
+      const cx = x + (i % cols) * (cw + gap);
+      if (i % cols === 0) cy = bottom;
+      let ry = cy + (compact ? 22 : 24);
+      tagChips(ctx, [t], cx + 34, ry - 12, 14);
+      text(ctx, d.name, cx + 42, ry, 15, { weight: 700, color: n ? C.formInk : C.formMuted });
+      mono(ctx, `${n} SOURCE${n === 1 ? '' : 'S'}`, cx + cw, ry, 10, { weight: 600, color: C.formMuted, align: 'right' });
       const rows = compact ? [[tier >= 2 ? 1 : 0, tier >= 2 ? syn.second : 2]] : [[0, 2], [1, syn.second]];
       for (const [k, need] of rows) {
-        cy += compact ? 17 : 19;
-        checkbox(ctx, x + 42, cy - 12, tier > k ? 'done' : 'open');
+        ry += compact ? 17 : 19;
+        checkbox(ctx, cx + 42, ry - 12, tier > k ? 'done' : 'open');
         const color = tier > k ? C.formInk : C.formMuted;
-        text(ctx, `${need}: ${d.tiers[k]}`, x + 64, cy, 13, { weight: tier > k ? 600 : 500, color, maxWidth: w - 64 });
+        text(ctx, `${need}: ${d.tiers[k]}`, cx + 64, ry, 13, { weight: tier > k ? 600 : 500, color, maxWidth: cw - 64 });
       }
-      rule(ctx, x, x + w, cy + 7, C.ruleSoft);
-    }
-    return cy + 8;
+      rule(ctx, cx, cx + cw, ry + 7, C.ruleSoft);
+      bottom = Math.max(bottom, ry);
+    });
+    return Math.max(top, bottom) + 8;
   }
 
   renderMods(ctx, x, cy, w, compact) {
