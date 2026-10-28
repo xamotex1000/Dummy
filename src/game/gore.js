@@ -4,13 +4,17 @@
 // for the round. With gore off nothing here runs, and callers fall back
 // to foam and plastic chips.
 
+import { perf } from '../engine/perf.js';
 import { C } from './theme.js';
 import { settings } from './settings.js';
 
-const MAX_DROPS = 500;
+// Flying droplets, by quality level.
+const MAX_DROPS = [500, 320, 200];
 const MAX_STAINS = 320;
 const GRAVITY = 1500;
 const DRIED = '#7d1826';
+// The stain layer reaches this far past the arena, for floor pools.
+const PAD = 24;
 
 export class Gore {
   constructor(scene) {
@@ -26,6 +30,9 @@ export class Gore {
     this.drops = [];
     this.stains = [];
     this.spurts = [];
+    // Finished stains are baked into an offscreen layer (see drawStains).
+    this.layer = null;
+    this.layerKey = '';
   }
 
   // A burst of droplets from (x, y), roughly along (dx, dy).
@@ -34,7 +41,7 @@ export class Gore {
     const rng = this.sc.rng;
     const base = Math.atan2(dy, dx);
     for (let i = 0; i < n; i++) {
-      if (this.drops.length >= MAX_DROPS) this.drops.shift();
+      if (this.drops.length >= MAX_DROPS[perf.level]) this.drops.shift();
       const a = base + rng.range(-spread, spread);
       const sp = rng.range(120, 520) * speed;
       this.drops.push({
@@ -108,33 +115,72 @@ export class Gore {
   }
 
   // Stains go on the cell itself, behind the machine and the dummies.
+  // A stain whose run has finished never changes again, so it's baked into
+  // an offscreen layer once; only the ones still running are drawn live.
+  // A stain pushed out by MAX_STAINS stays on the layer: blood is blood.
   drawStains(ctx) {
     if (!this.on || !this.stains.length) return;
     const B = this.sc.bounds;
+    const k = this.sc.layout.k * this.sc.engine.renderer.dpr;
+    const key = `${B.right}x${B.bottom}@${k}`;
+    if (key !== this.layerKey) this.rebuildLayer(key, k);
+    const fresh = this.stains.filter((s) => !s.baked && s.run >= s.runMax);
+    if (fresh.length) {
+      const g = this.layer.getContext('2d');
+      this.paint(g, fresh);
+      for (const s of fresh) s.baked = true;
+    }
     ctx.save();
     ctx.globalAlpha = 0.88;
-    for (const s of this.stains) {
-      ctx.fillStyle = s.dark ? DRIED : C.blood;
+    ctx.drawImage(this.layer, -PAD, -PAD, B.right + PAD * 2, B.bottom + PAD * 2);
+    this.paint(ctx, this.stains.filter((s) => !s.baked));
+    ctx.restore();
+  }
+
+  // A fresh layer for the current arena size and resolution, with every
+  // baked stain painted back in.
+  rebuildLayer(key, k) {
+    const B = this.sc.bounds;
+    const c = document.createElement('canvas');
+    c.width = Math.ceil((B.right + PAD * 2) * k);
+    c.height = Math.ceil((B.bottom + PAD * 2) * k);
+    const g = c.getContext('2d');
+    g.setTransform(k, 0, 0, k, PAD * k, PAD * k);
+    this.layer = c;
+    this.layerKey = key;
+    this.paint(g, this.stains.filter((s) => s.baked));
+  }
+
+  // Stains come in two colors, so they're drawn as two paths.
+  paint(ctx, stains) {
+    if (!stains.length) return;
+    const B = this.sc.bounds;
+    for (const dark of [false, true]) {
+      ctx.fillStyle = dark ? DRIED : C.blood;
       ctx.beginPath();
-      if (s.surface === 'floor') {
-        ctx.ellipse(s.x, B.bottom + 1, s.r * s.stretch, s.r * 0.65, 0, 0, Math.PI * 2);
-      } else {
-        ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-        for (const d of s.dots) {
-          ctx.moveTo(s.x + d.dx + d.r, s.y + d.dy);
-          ctx.arc(s.x + d.dx, s.y + d.dy, d.r, 0, Math.PI * 2);
+      for (const s of stains) {
+        if (s.dark !== dark) continue;
+        if (s.surface === 'floor') {
+          const rx = s.r * s.stretch;
+          ctx.moveTo(s.x + rx, B.bottom + 1);
+          ctx.ellipse(s.x, B.bottom + 1, rx, s.r * 0.65, 0, 0, Math.PI * 2);
+        } else {
+          ctx.moveTo(s.x + s.r, s.y);
+          ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+          for (const d of s.dots) {
+            ctx.moveTo(s.x + d.dx + d.r, s.y + d.dy);
+            ctx.arc(s.x + d.dx, s.y + d.dy, d.r, 0, Math.PI * 2);
+          }
+        }
+        if (s.run > 0) {
+          const w = Math.max(1, s.r * 0.6);
+          ctx.rect(s.x - w / 2, s.y, w, s.run);
+          ctx.moveTo(s.x + w * 0.8, s.y + s.run);
+          ctx.arc(s.x, s.y + s.run, w * 0.8, 0, Math.PI * 2);
         }
       }
       ctx.fill();
-      if (s.run > 0) {
-        const w = Math.max(1, s.r * 0.6);
-        ctx.fillRect(s.x - w / 2, s.y, w, s.run);
-        ctx.beginPath();
-        ctx.arc(s.x, s.y + s.run, w * 0.8, 0, Math.PI * 2);
-        ctx.fill();
-      }
     }
-    ctx.restore();
   }
 
   drawDrops(ctx) {
